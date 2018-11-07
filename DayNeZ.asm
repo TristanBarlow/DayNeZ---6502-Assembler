@@ -40,7 +40,7 @@ joyPad1_state .rs 1
 bullet_active .rs 1
 temp_x        .rs 1
 temp_y        .rs 1
-enemy_info    .rs 4 * NUM_ENEMIES
+enemy_info    .rs 5 * NUM_ENEMIES
 bigNumber     .rs 2
 outVec        .rs 2
 collisionFlag .rs 1
@@ -52,7 +52,7 @@ vecY  .rs 1
     .rsset $0200
 sprite_player .rs 4
 sprite_bullet .rs 4
-sprite_enemy  .rs 4 * NUM_ENEMIES
+sprite_enemy  .rs 5 * NUM_ENEMIES
 
     .rsset $0000
 SPRITE_Y .rs 1
@@ -62,7 +62,7 @@ SPRITE_X .rs 1
 
     .rsset $0000
 ENEMY_SPEED .rs 1
-
+STATUS_FLAG .rs 1
 
 
 
@@ -108,41 +108,41 @@ GetDirection .macro
 ; SET X REG TO 0 IF NOT IN LOOP WITH CONSTANT COLLISION SIZES
 ;| 1 : x1 | 2 : y1 | 3 : w1 | 4 : h1 | 5 : x2 | 6 : y2 | 7 : w2 | 8 :  h2|
 CheckCollisionWithXReg .macro 
-    LDA #%00000001
+    LDA #%00000000
     STA collisionFlag
 
     LDA \1, x      ; load x1
     SEC
-    SBC #\7          ; subtract w2
+    SBC \7        ; subtract w2
     CMP \5          ;compare with x2  
     BCS NoCollision ; branch if x1-w2 >=
 
 
     CLC 
-    ADC #(\3 + \7)     ; Add width 1 and width 2 to A 
+    ADC #16     ; Add width 1 and width 2 to A 
     CMP \5          ; compare to x2
     BCC NoCollision ; branch if no collision
     
     LDA \2, x ; caluclate y_enemy - bullet width(y1 - h2)
     SEC
-    SBC \8                         ; assume w2 = 8
+    SBC \8                       ; assume w2 = 8
     CMP \6 ;compare with x  bullet   
     BCS NoCollision ; branch if x1-w2 >=
 
     CLC 
-    ADC #(\4+\8)                    ; Calculat x_enemy + w_eneym (x1 + w1) assuming w1 = 8
+    ADC \4+\8                    ; Calculat x_enemy + w_eneym (x1 + w1) assuming w1 = 8
     CMP \6
-    BCC EndCollision ; 
+    BCS EndCollision ; 
 
 NoCollision
-    LDA #%00000000
+    LDA #%00000001
     STA collisionFlag
 EndCollision
     .endm
 ; SET X REG TO 0 IF NOT IN LOOP WITH CONSTANT COLLISION SIZES
 ;| 1: sprite1| 2 : w1 | 3 : h1 | 4 : sprite2 | 5 : w2 | 6 :  h2|
 CheckSpriteCollisionWithXReg .macro 
-    LDA #%00000001
+    LDA #%00000000
     STA collisionFlag
 
     LDA \1 + SPRITE_X, x      ; load x1
@@ -157,19 +157,19 @@ CheckSpriteCollisionWithXReg .macro
     CMP \4 + SPRITE_X          ; compare to x2
     BCC NoCollision ; branch if no collision
     
-    LDA \2, x ; caluclate y_enemy - bullet width(y1 - h2)
+    LDA \1 + SPRITE_Y, x ; caluclate y_enemy - bullet width(y1 - h2)
     SEC
-    SBC \8                         ; assume w2 = 8
-    CMP \6 ;compare with x  bullet   
+    SBC \6                         ; assume w2 = 8
+    CMP \4+SPRITE_Y ;compare with x  bullet   
     BCS NoCollision ; branch if x1-w2 >=
 
     CLC 
-    ADC \4+\8                    ; Calculat x_enemy + w_eneym (x1 + w1) assuming w1 = 8
-    CMP \6
-    BCC EndCollision ; 
+    ADC \3+\6                    ; Calculat x_enemy + w_eneym (x1 + w1) assuming w1 = 8
+    CMP \4+SPRITE_Y
+    BCS EndCollision ; 
 
 NoCollision
-    LDA #%00000000
+    LDA #%00000001
     STA collisionFlag
 EndCollision
     .endm
@@ -501,35 +501,16 @@ UpdateEnemiesNoReverse:
 
 
 
-    CheckCollisionWithXReg sprite_enemy + SPRITE_X, sprite_enemy + SPRITE_Y, #8, #8, sprite_bullet + SPRITE_X, sprite_bullet + SPRITE_Y, #8,#8
+    ;CheckCollisionWithXReg sprite_enemy + SPRITE_X, sprite_enemy + SPRITE_Y, #8, #8, sprite_bullet + SPRITE_X, sprite_bullet + SPRITE_Y, #8,#8
+    CheckSpriteCollisionWithXReg sprite_enemy, #8, #8, sprite_bullet, #8,#8
 
     LDA collisionFlag
-    CMP #%00000001
     BNE UpdateEnemiesNoCollision
-    NOP
+    LDA #0
+    STA sprite_enemy + SPRITE_X, x
+    STA sprite_enemy + SPRITE_Y, x
     
     JMP UpdateEnemiesNoCollision
-
-    ; LDA sprite_enemy +SPRITE_X, x ; caluclate x_enemy - bullet width(x1 - w2)
-    ; SEC
-    ; SBC #8                          ; assume w2 = 8
-    ; CMP sprite_bullet + SPRITE_X ;compare with x  bullet   
-    ; BCS UpdateEnemiesNoCollision ; branch if x1-w2 >=
-    ; CLC 
-    ; ADC #16                      ; Calculat x_enemy + w_eneym (x1 + w1) assuming w1 = 8
-    ; CMP sprite_bullet + SPRITE_X
-    ; BCC UpdateEnemiesNoCollision ; Branching if x1+w1 < x2
-    
-    ; LDA sprite_enemy +SPRITE_Y, x ; caluclate y_enemy - bullet width(y1 - h2)
-    ; SEC
-    ; SBC #7                         ; assume w2 = 8
-    ; CMP sprite_bullet + SPRITE_Y ;compare with x  bullet   
-    ; BCS UpdateEnemiesNoCollision ; branch if x1-w2 >=
-    ; CLC 
-    ; ADC #16                      ; Calculat x_enemy + w_eneym (x1 + w1) assuming w1 = 8
-    ; CMP sprite_bullet + SPRITE_Y
-    ; BCC UpdateEnemiesNoCollision ; Branching if x1+w1 < x2
-    ; Handle collision
 
 UpdateEnemiesNoCollision:
     DEX
