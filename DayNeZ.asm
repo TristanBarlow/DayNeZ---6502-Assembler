@@ -20,23 +20,6 @@ OAMDMA    = $4014
 JOYPAD1   = $4016
 JOYPAD2   = $4017
 
-    .rsset $0010
-joyPad1_state .rs 1
-bullet_active .rs 1
-
-
-    .rsset $0200
-sprite_player .rs 4
-sprite_bullet .rs 5
-
-    .rsset $0000
-SPRITE_Y .rs 1
-SPRITE_TILE .rs 1
-SPRITE_ATTR .rs 1
-SPRITE_X .rs 1
-bullet_ATT .rs 1
-
-
 BUTTON_A      = %10000000
 BUTTON_B      = %01000000
 BUTTON_SELECT = %00100000
@@ -46,10 +29,151 @@ BUTTON_DOWN   = %00000100
 BUTTON_LEFT   = %00000010
 BUTTON_RIGHT  = %00000001
 
+ENEMY_SQUAD_WIDTH = 6
+ENEMY_SQUAD_HEIGHT = 4
+NUM_ENEMIES  = ENEMY_SQUAD_HEIGHT * ENEMY_SQUAD_WIDTH
+ENEMY_SPACING = 16
+ENEMY_DECENT_SPEED = 5
 
-    
+    .rsset $0000
+joyPad1_state .rs 1
+bullet_active .rs 1
+temp_x        .rs 1
+temp_y        .rs 1
+enemy_info    .rs 4 * NUM_ENEMIES
+bigNumber     .rs 2
+outVec        .rs 2
+collisionFlag .rs 1
+
+    .rsset $0000
+vecX  .rs 1
+vecY  .rs 1
+
+    .rsset $0200
+sprite_player .rs 4
+sprite_bullet .rs 4
+sprite_enemy  .rs 4 * NUM_ENEMIES
+
+    .rsset $0000
+SPRITE_Y .rs 1
+SPRITE_TILE .rs 1
+SPRITE_ATTR .rs 1
+SPRITE_X .rs 1
+
+    .rsset $0000
+ENEMY_SPEED .rs 1
+
+
+
+
     .bank 0
     .org $C000 
+
+;---------------------------- MACROS ---------------------;
+SignFlip .macro 
+    EOR #%11111111
+    CLC 
+    ADC #1
+    .endm
+
+; 1st param adress second param value to add
+AddValueInLoop .macro
+    LDA \1,x
+    CLC
+    ADC \2
+    STA \1,x
+    .endm
+
+; 1st param adress second param value to add
+AddValue .macro
+    LDA \1
+    CLC
+    ADC \2
+    STA \1
+    .endm
+
+GetDirection .macro 
+    ;Get X dir
+    LDA \3
+    SEC
+    SBC \1
+    STA \5 + vecX
+
+    LDA \4
+    SEC
+    SBC \2
+    STA \5 + vecY
+    .endm
+
+; SET X REG TO 0 IF NOT IN LOOP WITH CONSTANT COLLISION SIZES
+;| 1 : x1 | 2 : y1 | 3 : w1 | 4 : h1 | 5 : x2 | 6 : y2 | 7 : w2 | 8 :  h2|
+CheckCollisionWithXReg .macro 
+    LDA #%00000001
+    STA collisionFlag
+
+    LDA \1, x      ; load x1
+    SEC
+    SBC #\7          ; subtract w2
+    CMP \5          ;compare with x2  
+    BCS NoCollision ; branch if x1-w2 >=
+
+
+    CLC 
+    ADC #(\3 + \7)     ; Add width 1 and width 2 to A 
+    CMP \5          ; compare to x2
+    BCC NoCollision ; branch if no collision
+    
+    LDA \2, x ; caluclate y_enemy - bullet width(y1 - h2)
+    SEC
+    SBC \8                         ; assume w2 = 8
+    CMP \6 ;compare with x  bullet   
+    BCS NoCollision ; branch if x1-w2 >=
+
+    CLC 
+    ADC #(\4+\8)                    ; Calculat x_enemy + w_eneym (x1 + w1) assuming w1 = 8
+    CMP \6
+    BCC EndCollision ; 
+
+NoCollision
+    LDA #%00000000
+    STA collisionFlag
+EndCollision
+    .endm
+; SET X REG TO 0 IF NOT IN LOOP WITH CONSTANT COLLISION SIZES
+;| 1: sprite1| 2 : w1 | 3 : h1 | 4 : sprite2 | 5 : w2 | 6 :  h2|
+CheckSpriteCollisionWithXReg .macro 
+    LDA #%00000001
+    STA collisionFlag
+
+    LDA \1 + SPRITE_X, x      ; load x1
+    SEC
+    SBC \5          ; subtract w2
+    CMP \4 + SPRITE_X          ;compare with x2  
+    BCS NoCollision ; branch if x1-w2 >=
+
+
+    CLC 
+    ADC \2 + \5     ; Add width 1 and width 2 to A 
+    CMP \4 + SPRITE_X          ; compare to x2
+    BCC NoCollision ; branch if no collision
+    
+    LDA \2, x ; caluclate y_enemy - bullet width(y1 - h2)
+    SEC
+    SBC \8                         ; assume w2 = 8
+    CMP \6 ;compare with x  bullet   
+    BCS NoCollision ; branch if x1-w2 >=
+
+    CLC 
+    ADC \4+\8                    ; Calculat x_enemy + w_eneym (x1 + w1) assuming w1 = 8
+    CMP \6
+    BCC EndCollision ; 
+
+NoCollision
+    LDA #%00000000
+    STA collisionFlag
+EndCollision
+    .endm
+;----------------------------- RESET ---------------------;
 RESET:
     SEI          ; disable IRQs
     CLD          ; disable decimal mode
@@ -70,13 +194,15 @@ clrmem:
     LDA #$00
     STA $0000, x
     STA $0100, x
-    STA $0200, x
+    STA $0300, x
     STA $0400, x
     STA $0500, x
     STA $0600, x
     STA $0700, x
     LDA #$FE
-    STA $0300, x
+        
+    STA $0200, x
+
     INX
     BNE clrmem
    
@@ -102,13 +228,13 @@ vblankwait2:      ; Second wait for vblank, PPU is ready after this
     STA PPUDATA
 
 ; Write pallet 00
-    LDA #$00
+    LDA #24
     STA PPUDATA
-    LDA #$01
+    LDA #$15
     STA PPUDATA
     LDA #$2A
     STA PPUDATA
-    LDA #$25
+    LDA #$0F
     STA PPUDATA
 
 
@@ -126,6 +252,47 @@ vblankwait2:      ; Second wait for vblank, PPU is ready after this
     LDA #128    ; X pos
     STA sprite_player + SPRITE_X
 
+;---------------------------- Init enemies -------------------------;
+    LDX #0
+    LDA #ENEMY_SQUAD_HEIGHT  * ENEMY_SPACING
+    STA temp_y
+InitEnemiesLoop_Y:
+    LDA #ENEMY_SQUAD_WIDTH *ENEMY_SPACING
+    STA temp_x
+InitEnemiesLoop_X:
+    ; Accumlator  = temp_x here
+
+    STA sprite_enemy + SPRITE_X, x
+    LDA temp_y
+    STA sprite_enemy + SPRITE_Y,x
+    LDA #2 
+    STA sprite_enemy + SPRITE_TILE, X
+    LDA #%00000000   
+    STA sprite_enemy+ SPRITE_ATTR, x
+
+    LDA #1
+    STA enemy_info + ENEMY_SPEED, x
+
+    ;Increment X by 4
+    TXA
+    CLC
+    ADC #4
+    TAX
+
+    LDA temp_x
+    SEC
+    SBC #ENEMY_SPACING
+    STA temp_x
+    BNE InitEnemiesLoop_X
+
+    LDA temp_y
+    SEC
+    SBC #ENEMY_SPACING
+    STA temp_y
+    BNE InitEnemiesLoop_Y
+
+
+    GetDirection #1 , #1, #5, #5, outVec
 
     LDA #%10000000  ;binary notation to Enable NMI
     STA PPUCTRL  
@@ -145,8 +312,8 @@ NMI:
 ControllerReturn:
 
 
-    JMP UpdateBullet
-BulletReturn:
+    JMP GameUpdate
+UpdateReturn:
 
     ;copy sprite data to the ppu#
     LDA #0
@@ -167,6 +334,7 @@ ControllerRead:
     ;Read joypad A is already 0
     LDX #0
     STX joyPad1_state
+
 ReadController:
     LDA JOYPAD1
     LSR A 
@@ -179,7 +347,7 @@ ReadController:
     LDA joyPad1_state
     AND #BUTTON_A
     BEQ  LookAt_B   ;Branch if equal
-    JSR SpawnBullet
+    JSR TrySpawnBullet
 
 ;----------- B BUTTON--------;
 LookAt_B:
@@ -258,7 +426,13 @@ ControllerReadFinished:
     JMP ControllerReturn
 
 ;--------------------------------------SPAWNING----------------------------;
+TrySpawnBullet:
+    LDA bullet_active
+    BEQ SpawnBullet
+    RTS
+
 SpawnBullet:
+
     ; Spawn a bullet
     LDA  sprite_player + SPRITE_Y       ; Y pos
     STA  sprite_bullet + SPRITE_Y
@@ -276,20 +450,95 @@ SpawnBullet:
     STA bullet_active
     RTS
 
+
+GameUpdate:
+
 UpdateBullet:
     LDA bullet_active
-    BEQ BulletGone
+    BEQ UpdateEnemies
     LDA sprite_bullet + SPRITE_Y
     SEC
     SBC #1
     STA sprite_bullet + SPRITE_Y
-    BCS BulletGone
+    BCS UpdateEnemies
     LDA #0
     STA bullet_active
-    JMP BulletReturn
+    JMP UpdateEnemies
+    
+UpdateEnemies:
+    LDX #(NUM_ENEMIES-1)*4
+UpdateEnemiesLoop:
+    LDA sprite_enemy+SPRITE_X, x
+    CLC
+    ADC enemy_info + ENEMY_SPEED, x
+    STA sprite_enemy+SPRITE_X,X
+    CMP  #256 - ENEMY_SPACING 
+    BCS EnemyReverse
+    CMP #ENEMY_SPACING
+    BCC EnemyReverse
+    JMP UpdateEnemiesNoReverse
 
-BulletGone:
-    JMP BulletReturn
+EnemyReverse:
+    LDA enemy_info + ENEMY_SPEED, x
+    SignFlip
+    STA enemy_info + ENEMY_SPEED, x
+
+
+    AddValueInLoop sprite_enemy + SPRITE_Y, #ENEMY_DECENT_SPEED
+    LDA sprite_enemy+SPRITE_ATTR,X
+    EOR #%01000000
+    STA sprite_enemy+SPRITE_ATTR,X
+
+    ;LDA sprite_enemy + SPRITE_Y, x
+    ;CLC
+    ;ADC #5
+    ;STA sprite_enemy + SPRITE_Y, x
+
+    ; reverse direction
+
+UpdateEnemiesNoReverse:
+    ; check collisions
+
+
+
+    CheckCollisionWithXReg sprite_enemy + SPRITE_X, sprite_enemy + SPRITE_Y, #8, #8, sprite_bullet + SPRITE_X, sprite_bullet + SPRITE_Y, #8,#8
+
+    LDA collisionFlag
+    CMP #%00000001
+    BNE UpdateEnemiesNoCollision
+    NOP
+    
+    JMP UpdateEnemiesNoCollision
+
+    ; LDA sprite_enemy +SPRITE_X, x ; caluclate x_enemy - bullet width(x1 - w2)
+    ; SEC
+    ; SBC #8                          ; assume w2 = 8
+    ; CMP sprite_bullet + SPRITE_X ;compare with x  bullet   
+    ; BCS UpdateEnemiesNoCollision ; branch if x1-w2 >=
+    ; CLC 
+    ; ADC #16                      ; Calculat x_enemy + w_eneym (x1 + w1) assuming w1 = 8
+    ; CMP sprite_bullet + SPRITE_X
+    ; BCC UpdateEnemiesNoCollision ; Branching if x1+w1 < x2
+    
+    ; LDA sprite_enemy +SPRITE_Y, x ; caluclate y_enemy - bullet width(y1 - h2)
+    ; SEC
+    ; SBC #7                         ; assume w2 = 8
+    ; CMP sprite_bullet + SPRITE_Y ;compare with x  bullet   
+    ; BCS UpdateEnemiesNoCollision ; branch if x1-w2 >=
+    ; CLC 
+    ; ADC #16                      ; Calculat x_enemy + w_eneym (x1 + w1) assuming w1 = 8
+    ; CMP sprite_bullet + SPRITE_Y
+    ; BCC UpdateEnemiesNoCollision ; Branching if x1+w1 < x2
+    ; Handle collision
+
+UpdateEnemiesNoCollision:
+    DEX
+    DEX
+    DEX
+    DEX
+    BPL UpdateEnemiesLoop
+
+    JMP UpdateReturn
 
 ;;;;;;;;;;;;;;   
   
