@@ -29,30 +29,47 @@ BUTTON_DOWN   = %00000100
 BUTTON_LEFT   = %00000010
 BUTTON_RIGHT  = %00000001
 
-ENEMY_SQUAD_WIDTH = 6
-ENEMY_SQUAD_HEIGHT = 4
+COLLIDE_RIGHT= %00000001
+COLLIDE_LEFT = %00000010
+COLLIDE_UP   = %00000100
+COLLIDE_DOWN = %00001000
+
+ENEMY_SQUAD_WIDTH = 1
+ENEMY_SQUAD_HEIGHT = 2
 NUM_ENEMIES  = ENEMY_SQUAD_HEIGHT * ENEMY_SQUAD_WIDTH
 ENEMY_SPACING = 16
 ENEMY_DECENT_SPEED = 5
 
-    .rsset $0000
-joyPad1_state .rs 1
-bullet_active .rs 1
-temp_x        .rs 1
-temp_y        .rs 1
-enemy_info    .rs 5 * NUM_ENEMIES
-bigNumber     .rs 2
-outVec        .rs 2
-collisionFlag .rs 1
+GRAVITY  = 8         ; Sub pixel per frame 
+MAX_Y_SPEED = 2      ; pixel per frame
+FLOORHEIGHT = 220
+GROUND_FRICTION = 1  ; Sub pixel per frame
+
 
     .rsset $0000
-vecX  .rs 1
-vecY  .rs 1
+joyPad1_state   .rs 1
+bullet_active   .rs 1
+temp_x          .rs 1
+temp_y          .rs 1
+enemy_info      .rs 4 * NUM_ENEMIES
+enemy_movement  .rs 5 * NUM_ENEMIES
+bigNumber       .rs 2
+outVec          .rs 2
+collisionFlag   .rs 1
+jumpDest        .rs 2
+player_movement .rs 5
+
+    .rsset $0000
+speedY  .rs 2 ; sub pixels per frame
+speedX  .rs 2 ; sub pixels per frame
+pos     .rs 2
 
     .rsset $0200
 sprite_player .rs 4
 sprite_bullet .rs 4
-sprite_enemy  .rs 5 * NUM_ENEMIES
+sprite_wall   .rs 4
+sprite_enemy  .rs 4 * NUM_ENEMIES
+
 
     .rsset $0000
 SPRITE_Y .rs 1
@@ -62,7 +79,9 @@ SPRITE_X .rs 1
 
     .rsset $0000
 ENEMY_SPEED .rs 1
-STATUS_FLAG .rs 1
+enemyStatus .rs 1
+enemyWidth  .rs 1
+enemyHeight .rs 1
 
 
 
@@ -92,6 +111,21 @@ AddValue .macro
     STA \1
     .endm
 
+;| 1: 16 variable | 2: 16bit Value to add| 
+Add16Bit .macro 
+    LDA \1
+    CLC
+    ADC #LOW(\2)
+    STA \1
+    LDA \1 + 1 ;high 8 bits
+    ADC #HIGH(\2) ; DIDNT CLEAR CARRY
+    STA \1 + 1
+    .endm
+
+;| 1: Movement Variable | 2: 
+ApplyPhysics .macro
+
+    .endm
 GetDirection .macro 
     ;Get X dir
     LDA \3
@@ -105,39 +139,14 @@ GetDirection .macro
     STA \5 + vecY
     .endm
 
-; SET X REG TO 0 IF NOT IN LOOP WITH CONSTANT COLLISION SIZES
-;| 1 : x1 | 2 : y1 | 3 : w1 | 4 : h1 | 5 : x2 | 6 : y2 | 7 : w2 | 8 :  h2|
-CheckCollisionWithXReg .macro 
-    LDA #%00000000
-    STA collisionFlag
-
-    LDA \1, x      ; load x1
-    SEC
-    SBC \7        ; subtract w2
-    CMP \5          ;compare with x2  
-    BCS NoCollision ; branch if x1-w2 >=
-
-
-    CLC 
-    ADC #16     ; Add width 1 and width 2 to A 
-    CMP \5          ; compare to x2
-    BCC NoCollision ; branch if no collision
-    
-    LDA \2, x ; caluclate y_enemy - bullet width(y1 - h2)
-    SEC
-    SBC \8                       ; assume w2 = 8
-    CMP \6 ;compare with x  bullet   
-    BCS NoCollision ; branch if x1-w2 >=
-
-    CLC 
-    ADC \4+\8                    ; Calculat x_enemy + w_eneym (x1 + w1) assuming w1 = 8
-    CMP \6
-    BCS EndCollision ; 
-
-NoCollision
-    LDA #%00000001
-    STA collisionFlag
-EndCollision
+CielingValue .macro
+    LDA \2
+    CMP \1
+    BCC Cap\@
+    JMP Fin\@
+Cap\@:
+    STA \1
+Fin\@:
     .endm
 ; SET X REG TO 0 IF NOT IN LOOP WITH CONSTANT COLLISION SIZES
 ;| 1: sprite1| 2 : w1 | 3 : h1 | 4 : sprite2 | 5 : w2 | 6 :  h2|
@@ -149,30 +158,31 @@ CheckSpriteCollisionWithXReg .macro
     SEC
     SBC \5          ; subtract w2
     CMP \4 + SPRITE_X          ;compare with x2  
-    BCS NoCollision ; branch if x1-w2 >=
+    BCS NoCollision\@ ; branch if x1-w2 >=
 
 
     CLC 
     ADC \2 + \5     ; Add width 1 and width 2 to A 
     CMP \4 + SPRITE_X          ; compare to x2
-    BCC NoCollision ; branch if no collision
+    BCC NoCollision\@ ; branch if no collision
     
     LDA \1 + SPRITE_Y, x ; caluclate y_enemy - bullet width(y1 - h2)
     SEC
     SBC \6                         ; assume w2 = 8
     CMP \4+SPRITE_Y ;compare with x  bullet   
-    BCS NoCollision ; branch if x1-w2 >=
+    BCS NoCollision\@ ; branch if x1-w2 >=
 
     CLC 
     ADC \3+\6                    ; Calculat x_enemy + w_eneym (x1 + w1) assuming w1 = 8
     CMP \4+SPRITE_Y
-    BCS EndCollision ; 
+    BCS EndCollision\@ ; 
 
-NoCollision
+NoCollision\@
     LDA #%00000001
     STA collisionFlag
-EndCollision
+EndCollision\@
     .endm
+
 ;----------------------------- RESET ---------------------;
 RESET:
     SEI          ; disable IRQs
@@ -223,18 +233,14 @@ vblankwait2:      ; Second wait for vblank, PPU is ready after this
     LDA #$10
     STA PPUADDR
 
-    ;Write the BackgroundColor
-    LDA #$30
-    STA PPUDATA
-
 ; Write pallet 00
-    LDA #24
-    STA PPUDATA
-    LDA #$15
-    STA PPUDATA
-    LDA #$2A
-    STA PPUDATA
     LDA #$0F
+    STA PPUDATA
+    LDA #$17
+    STA PPUDATA
+    LDA #$20
+    STA PPUDATA
+    LDA #$39
     STA PPUDATA
 
 
@@ -243,7 +249,7 @@ vblankwait2:      ; Second wait for vblank, PPU is ready after this
     LDA  #120       ; Y pos
     STA  sprite_player + SPRITE_Y
 
-    LDA  #0         ; Tile number
+    LDA  #$00         ; Tile number
     STA  sprite_player + SPRITE_TILE
 
     LDA  #%00000000         ; Attributes ????
@@ -251,6 +257,20 @@ vblankwait2:      ; Second wait for vblank, PPU is ready after this
 
     LDA #128    ; X pos
     STA sprite_player + SPRITE_X
+
+;--------------------- wall Data --------------;
+    ; Write sprite data for 0 OAM memory Object memory
+    LDA  #FLOORHEIGHT      ; Y pos
+    STA  sprite_wall + SPRITE_Y
+
+    LDA  #$10         ; Tile number
+    STA  sprite_wall + SPRITE_TILE
+
+    LDA  #%00000000         ; Attributes ????
+    STA sprite_wall + SPRITE_ATTR
+
+    LDA #128    ; X pos
+    STA sprite_wall + SPRITE_X
 
 ;---------------------------- Init enemies -------------------------;
     LDX #0
@@ -270,8 +290,14 @@ InitEnemiesLoop_X:
     LDA #%00000000   
     STA sprite_enemy+ SPRITE_ATTR, x
 
+    STA enemy_info + enemyStatus,x
+
+    LDA #8
+    STA enemy_info + enemyHeight, x
+
     LDA #1
     STA enemy_info + ENEMY_SPEED, x
+
 
     ;Increment X by 4
     TXA
@@ -291,8 +317,7 @@ InitEnemiesLoop_X:
     STA temp_y
     BNE InitEnemiesLoop_Y
 
-
-    GetDirection #1 , #1, #5, #5, outVec
+;----------- End Enemy loop -------------;
 
     LDA #%10000000  ;binary notation to Enable NMI
     STA PPUCTRL  
@@ -308,12 +333,10 @@ Forever:
 NMI:
 
 ; Update  And Check Controller
-    JMP ControllerRead
-ControllerReturn:
+    JSR ControllerRead
 
-
-    JMP GameUpdate
-UpdateReturn:
+; Perform game update
+    JSR GameUpdate
 
     ;copy sprite data to the ppu#
     LDA #0
@@ -364,20 +387,10 @@ LookAt_B:
 LookAt_UP:
     LDA joyPad1_state
     AND #BUTTON_UP
-    BEQ  LookAt_DOWN   ;Branch if equal
-    LDA sprite_player + SPRITE_Y
-    CLC
-    ADC #-1
-    STA sprite_player + SPRITE_Y
-
-;----------- DOWN BUTTON--------;
-LookAt_DOWN:
-    LDA joyPad1_state
-    AND #BUTTON_DOWN
     BEQ  LookAt_LEFT   ;Branch if equal
     LDA sprite_player + SPRITE_Y
     CLC
-    ADC #1
+    ADC #-1
     STA sprite_player + SPRITE_Y
 
 ;----------- LEFT BUTTON--------;
@@ -385,21 +398,25 @@ LookAt_LEFT:
     LDA joyPad1_state
     AND #BUTTON_LEFT
     BEQ  LookAt_RIGHT   ;Branch if equal
-    LDA sprite_player + SPRITE_X
-    CLC
-    ADC #-1
-    STA sprite_player + SPRITE_X
+    AddValue sprite_player + SPRITE_X, #-1
+    LDX 1
+    CheckSpriteCollisionWithXReg sprite_player, #8, #8, sprite_wall, #8,#8
+    LDA collisionFlag
+    BNE LookAt_RIGHT
+    AddValue sprite_player + SPRITE_X, #1
 
     
 ;----------- RIGHT BUTTON--------;
 LookAt_RIGHT:
     LDA joyPad1_state
     AND #BUTTON_RIGHT
-    BEQ  LookAt_START   ;Branch if equal
-    LDA sprite_player + SPRITE_X
-    CLC
-    ADC #1
-    STA sprite_player + SPRITE_X
+    BEQ  LookAt_START  ;Branch if equal
+    AddValue sprite_player + SPRITE_X, #1
+    LDX 1
+    CheckSpriteCollisionWithXReg sprite_player, #8, #8, sprite_wall, #8,#8
+    LDA collisionFlag
+    BNE LookAt_START
+    AddValue sprite_player + SPRITE_X, #-1
 
 ;----------- START BUTTON--------;
 LookAt_START:
@@ -410,6 +427,7 @@ LookAt_START:
     CLC
     ADC #1
     STA sprite_player + SPRITE_Y
+
  
 ;----------- SELECT BUTTON--------;
 LookAt_SELECT:
@@ -423,7 +441,33 @@ LookAt_SELECT:
 
 ;----------- CONTROLLER FINISHED --------;
 ControllerReadFinished:   
-    JMP ControllerReturn
+
+ApplyPlayerPhysics:
+    Add16Bit player_movement + speedY, GRAVITY
+    AddValue player_movement + pos + 1, player_movement + speedY
+
+    ; Apply the new new speed
+    LDA sprite_player + SPRITE_Y
+    ADC player_movement + speedY + 1
+
+
+    ;CHeck to see if its not greater than floorHeight
+    CMP #FLOORHEIGHT
+    BCS OnGround
+    STA sprite_player + SPRITE_Y
+    JMP ReturnFromPLayerUpdate
+
+OnGround:
+    LDA #0
+    STA player_movement +speedY
+    STA player_movement +speedY+1
+    ;STA player_movement + su
+    LDA #FLOORHEIGHT
+    STA sprite_player + SPRITE_Y
+
+ReturnFromPLayerUpdate:
+    CielingValue player_movement + speedY + 1, #MAX_Y_SPEED
+    RTS
 
 ;--------------------------------------SPAWNING----------------------------;
 TrySpawnBullet:
@@ -464,10 +508,18 @@ UpdateBullet:
     LDA #0
     STA bullet_active
     JMP UpdateEnemies
-    
+
+
 UpdateEnemies:
     LDX #(NUM_ENEMIES-1)*4
+
 UpdateEnemiesLoop:
+    LDA enemy_info + enemyStatus, x
+    BEQ NotDead
+    JMP UpdateEnemiesNoCollision
+
+NotDead:
+
     LDA sprite_enemy+SPRITE_X, x
     CLC
     ADC enemy_info + ENEMY_SPEED, x
@@ -489,37 +541,55 @@ EnemyReverse:
     EOR #%01000000
     STA sprite_enemy+SPRITE_ATTR,X
 
-    ;LDA sprite_enemy + SPRITE_Y, x
-    ;CLC
-    ;ADC #5
-    ;STA sprite_enemy + SPRITE_Y, x
-
-    ; reverse direction
-
 UpdateEnemiesNoReverse:
     ; check collisions
 
-
-
-    ;CheckCollisionWithXReg sprite_enemy + SPRITE_X, sprite_enemy + SPRITE_Y, #8, #8, sprite_bullet + SPRITE_X, sprite_bullet + SPRITE_Y, #8,#8
     CheckSpriteCollisionWithXReg sprite_enemy, #8, #8, sprite_bullet, #8,#8
 
     LDA collisionFlag
-    BNE UpdateEnemiesNoCollision
-    LDA #0
+    BNE CheckPlayerCollision
+
+    LDA #%00000001
+    STA enemy_info + enemyStatus, x
+
+    LDA #128
     STA sprite_enemy + SPRITE_X, x
     STA sprite_enemy + SPRITE_Y, x
-    
-    JMP UpdateEnemiesNoCollision
+
+CheckPlayerCollision:
+    CheckSpriteCollisionWithXReg sprite_enemy, #8,#8, sprite_player, #8,#8
+
+    LDA collisionFlag
+    BNE UpdateEnemiesNoCollision
+    JMP RESET
 
 UpdateEnemiesNoCollision:
     DEX
     DEX
     DEX
     DEX
-    BPL UpdateEnemiesLoop
+    BMI UpdateReturnJump
+    JMP UpdateEnemiesLoop
 
-    JMP UpdateReturn
+UpdateReturnJump:
+    RTS
+
+
+do_action:
+       asl A
+       tax
+       lda table+1,x
+       pha
+       lda table,x
+       pha
+       rts
+
+
+;--------------------- Data tabe-------------;
+table: 
+     .dw UpdateEnemiesNoCollision-1  
+
+
 
 ;;;;;;;;;;;;;;   
   
