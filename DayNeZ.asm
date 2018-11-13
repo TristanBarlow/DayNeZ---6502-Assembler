@@ -34,14 +34,15 @@ COLLIDE_LEFT = %00000010
 COLLIDE_UP   = %00000100
 COLLIDE_DOWN = %00001000
 
-ENEMY_SQUAD_WIDTH = 1
-ENEMY_SQUAD_HEIGHT = 2
+ENEMY_SQUAD_WIDTH = 3
+ENEMY_SQUAD_HEIGHT = 1
 NUM_ENEMIES  = ENEMY_SQUAD_HEIGHT * ENEMY_SQUAD_WIDTH
 ENEMY_SPACING = 16
 ENEMY_DECENT_SPEED = 5
+JUMP_FORCE = -(256+128)
 
-GRAVITY  = 8         ; Sub pixel per frame 
-MAX_Y_SPEED = 2      ; pixel per frame
+GRAVITY  =   8     ; Sub pixel per frame 
+MAX_Y_SPEED = 20      ; pixel per frame
 FLOORHEIGHT = 220
 GROUND_FRICTION = 1  ; Sub pixel per frame
 
@@ -49,20 +50,18 @@ GROUND_FRICTION = 1  ; Sub pixel per frame
     .rsset $0000
 joyPad1_state   .rs 1
 bullet_active   .rs 1
+enemy_info      .rs 4 * NUM_ENEMIES
+
+collisionFlag   .rs 1
 temp_x          .rs 1
 temp_y          .rs 1
-enemy_info      .rs 4 * NUM_ENEMIES
-enemy_movement  .rs 5 * NUM_ENEMIES
-bigNumber       .rs 2
-outVec          .rs 2
-collisionFlag   .rs 1
-jumpDest        .rs 2
-player_movement .rs 5
+active_sprite   .rs 1
+
 
     .rsset $0000
-speedY  .rs 2 ; sub pixels per frame
-speedX  .rs 2 ; sub pixels per frame
-pos     .rs 2
+speedY          .rs 2 ; sub pixels per frame
+speedX          .rs 2 ; sub pixels per frame
+pos             .rs 1 ; sub pixel movement position
 
     .rsset $0200
 sprite_player .rs 4
@@ -70,6 +69,9 @@ sprite_bullet .rs 4
 sprite_wall   .rs 4
 sprite_enemy  .rs 4 * NUM_ENEMIES
 
+    .rsset $0300
+enemy_movement  .rs 5 * NUM_ENEMIES
+player_movement .rs 5
 
     .rsset $0000
 SPRITE_Y .rs 1
@@ -78,7 +80,7 @@ SPRITE_ATTR .rs 1
 SPRITE_X .rs 1
 
     .rsset $0000
-ENEMY_SPEED .rs 1
+enemy_speed .rs 1
 enemyStatus .rs 1
 enemyWidth  .rs 1
 enemyHeight .rs 1
@@ -111,6 +113,14 @@ AddValue .macro
     STA \1
     .endm
 
+; 1: variable to subtract |2: value to sub 
+SubtractValue .macro
+    LDA \1
+    SEC
+    SBC \2
+    STA \1
+    .endm
+
 ;| 1: 16 variable | 2: 16bit Value to add| 
 Add16Bit .macro 
     LDA \1
@@ -122,10 +132,52 @@ Add16Bit .macro
     STA \1 + 1
     .endm
 
-;| 1: Movement Variable | 2: 
-ApplyPhysics .macro
+;| 1: Movement Variable | 2: sprite 
+ApplyPhysics .macro 
+    ; Apply Gravity
+    Add16Bit \1 + speedY, GRAVITY
+    AddValue \1 + pos, \1 + speedY
 
+    ; Apply the new new speed
+    LDA \2 + SPRITE_Y
+    ADC \1 + speedY + 1
+
+
+    ;CHeck to see if its not greater than floorHeight
+    CMP #FLOORHEIGHT
+    BCS OnGround\@
+    STA \2 + SPRITE_Y
+    JMP ReturnFromApplyPhysics\@
+
+OnGround\@:
+    ;If the object is on the ground
+    LDA #0
+    STA \1 +speedY
+    STA \1 +speedY+1
+    STA \1 + pos
+
+
+    LDA #FLOORHEIGHT
+    STA \2 + SPRITE_Y
+
+ReturnFromApplyPhysics\@:
     .endm
+
+;| 1: movement VAriable | 2: sprite;
+Jump .macro
+    ; Make sure is on the floor
+    LDA \2 + SPRITE_Y
+    CMP #FLOORHEIGHT
+    BCC NoJump\@
+
+    AddValue \2 + SPRITE_Y, #-2
+    LDA #LOW(JUMP_FORCE)
+    STA \1 + speedY
+    LDA #HIGH(JUMP_FORCE)
+    STA \1 + speedY +1
+NoJump\@:
+    .endm
+
 GetDirection .macro 
     ;Get X dir
     LDA \3
@@ -296,7 +348,7 @@ InitEnemiesLoop_X:
     STA enemy_info + enemyHeight, x
 
     LDA #1
-    STA enemy_info + ENEMY_SPEED, x
+    STA enemy_info + enemy_speed, x
 
 
     ;Increment X by 4
@@ -388,11 +440,7 @@ LookAt_UP:
     LDA joyPad1_state
     AND #BUTTON_UP
     BEQ  LookAt_LEFT   ;Branch if equal
-    LDA sprite_player + SPRITE_Y
-    CLC
-    ADC #-1
-    STA sprite_player + SPRITE_Y
-
+    Jump player_movement, sprite_player
 ;----------- LEFT BUTTON--------;
 LookAt_LEFT:
     LDA joyPad1_state
@@ -412,6 +460,12 @@ LookAt_RIGHT:
     AND #BUTTON_RIGHT
     BEQ  LookAt_START  ;Branch if equal
     AddValue sprite_player + SPRITE_X, #1
+
+    LDA sprite_player+SPRITE_ATTR,X
+
+    EOR #%01000000
+    STA sprite_player+SPRITE_ATTR,X
+
     LDX 1
     CheckSpriteCollisionWithXReg sprite_player, #8, #8, sprite_wall, #8,#8
     LDA collisionFlag
@@ -443,30 +497,7 @@ LookAt_SELECT:
 ControllerReadFinished:   
 
 ApplyPlayerPhysics:
-    Add16Bit player_movement + speedY, GRAVITY
-    AddValue player_movement + pos + 1, player_movement + speedY
-
-    ; Apply the new new speed
-    LDA sprite_player + SPRITE_Y
-    ADC player_movement + speedY + 1
-
-
-    ;CHeck to see if its not greater than floorHeight
-    CMP #FLOORHEIGHT
-    BCS OnGround
-    STA sprite_player + SPRITE_Y
-    JMP ReturnFromPLayerUpdate
-
-OnGround:
-    LDA #0
-    STA player_movement +speedY
-    STA player_movement +speedY+1
-    ;STA player_movement + su
-    LDA #FLOORHEIGHT
-    STA sprite_player + SPRITE_Y
-
-ReturnFromPLayerUpdate:
-    CielingValue player_movement + speedY + 1, #MAX_Y_SPEED
+    ApplyPhysics player_movement, sprite_player
     RTS
 
 ;--------------------------------------SPAWNING----------------------------;
@@ -500,10 +531,10 @@ GameUpdate:
 UpdateBullet:
     LDA bullet_active
     BEQ UpdateEnemies
-    LDA sprite_bullet + SPRITE_Y
+    LDA sprite_bullet + SPRITE_X
     SEC
     SBC #1
-    STA sprite_bullet + SPRITE_Y
+    STA sprite_bullet + SPRITE_X
     BCS UpdateEnemies
     LDA #0
     STA bullet_active
@@ -512,7 +543,6 @@ UpdateBullet:
 
 UpdateEnemies:
     LDX #(NUM_ENEMIES-1)*4
-
 UpdateEnemiesLoop:
     LDA enemy_info + enemyStatus, x
     BEQ NotDead
@@ -522,7 +552,7 @@ NotDead:
 
     LDA sprite_enemy+SPRITE_X, x
     CLC
-    ADC enemy_info + ENEMY_SPEED, x
+    ADC enemy_info + enemy_speed, x
     STA sprite_enemy+SPRITE_X,X
     CMP  #256 - ENEMY_SPACING 
     BCS EnemyReverse
@@ -531,13 +561,14 @@ NotDead:
     JMP UpdateEnemiesNoReverse
 
 EnemyReverse:
-    LDA enemy_info + ENEMY_SPEED, x
+    LDA enemy_info + enemy_speed, x
     SignFlip
-    STA enemy_info + ENEMY_SPEED, x
+    STA enemy_info + enemy_speed, x
 
 
-    AddValueInLoop sprite_enemy + SPRITE_Y, #ENEMY_DECENT_SPEED
+    
     LDA sprite_enemy+SPRITE_ATTR,X
+
     EOR #%01000000
     STA sprite_enemy+SPRITE_ATTR,X
 
@@ -549,9 +580,11 @@ UpdateEnemiesNoReverse:
     LDA collisionFlag
     BNE CheckPlayerCollision
 
+    ; Kill enemy
     LDA #%00000001
     STA enemy_info + enemyStatus, x
 
+    ;Move enemy off screen
     LDA #128
     STA sprite_enemy + SPRITE_X, x
     STA sprite_enemy + SPRITE_Y, x
@@ -572,6 +605,13 @@ UpdateEnemiesNoCollision:
     JMP UpdateEnemiesLoop
 
 UpdateReturnJump:
+
+    Jump enemy_movement, sprite_enemy
+    ApplyPhysics enemy_movement, sprite_enemy
+    ApplyPhysics enemy_movement+5, sprite_enemy+4
+    ApplyPhysics enemy_movement+10, sprite_enemy+8
+
+
     RTS
 
 
@@ -584,13 +624,12 @@ do_action:
        pha
        rts
 
-
 ;--------------------- Data tabe-------------;
 table: 
      .dw UpdateEnemiesNoCollision-1  
 
 
-
+SPRITE
 ;;;;;;;;;;;;;;   
   
   
