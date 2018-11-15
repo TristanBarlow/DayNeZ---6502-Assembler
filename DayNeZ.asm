@@ -46,12 +46,19 @@ MAX_Y_SPEED = 20      ; pixel per frame
 FLOORHEIGHT = 220
 GROUND_FRICTION = 1  ; Sub pixel per frame
 
+BULLET_INACTIVE = %00000000
+BULLET_ACTIVE   = %00000001
+BULLET_RIGHT    = %00000000
+BULLET_LEFT     = %01000000
+
+
+
+
 
     .rsset $0000
 joyPad1_state   .rs 1
-bullet_active   .rs 1
+bulletFlag      .rs 1
 enemy_info      .rs 4 * NUM_ENEMIES
-
 collisionFlag   .rs 1
 temp_x          .rs 1
 temp_y          .rs 1
@@ -64,7 +71,7 @@ speedX          .rs 2 ; sub pixels per frame
 pos             .rs 1 ; sub pixel movement position
 
     .rsset $0200
-sprite_player .rs 4
+sprite_player .rs 4 * 4
 sprite_bullet .rs 4
 sprite_wall   .rs 4
 sprite_enemy  .rs 4 * NUM_ENEMIES
@@ -132,21 +139,59 @@ Add16Bit .macro
     STA \1 + 1
     .endm
 
-;| 1: Movement Variable | 2: sprite 
+;|Start of sprites| number Of Sprites |
+MoveSpriteCollection
+
+;| sprite variable | x | y | tileID | Attr| 
+InitSpriteAtPos .macro
+        ; Write sprite data for 0 OAM memory Object memory
+    LDA  \3       ; Y pos
+    STA  \1 + SPRITE_Y
+
+    LDA  \4       ; Tile number
+    STA  \1 + SPRITE_TILE
+
+    LDA \5         ; Attributes ????
+    STA \1 + SPRITE_ATTR
+
+    LDA \2    ; X pos
+    STA \1 + SPRITE_X
+    .endm
+
+;| sprite to change | sprite Table | current index
+AnimateSprite .macro
+    .endm
+;|main sprie | X move | sprite Num
+MoveAllSpritesX .macro
+     ; Apply the phyics
+    LDX #((\3-1) * 4)
+ApplyToSprites\@:
+    LDA \1 + SPRITE_X,x
+    CLC
+    ADC \2
+    STA \1 + SPRITE_X,x
+    DEX
+    DEX
+    DEX
+    DEX
+    BPL ApplyToSprites\@
+    .endm
+
+;| 1: Movement Variable | 2: sprite  | numberOf Sprites
 ApplyPhysics .macro 
     ; Apply Gravity
     Add16Bit \1 + speedY, GRAVITY
     AddValue \1 + pos, \1 + speedY
 
-    ; Apply the new new speed
+    ; Apply the new speed DONT CLEAR CARRY
     LDA \2 + SPRITE_Y
     ADC \1 + speedY + 1
-
+    STA \2 + SPRITE_Y
 
     ;CHeck to see if its not greater than floorHeight
     CMP #FLOORHEIGHT
     BCS OnGround\@
-    STA \2 + SPRITE_Y
+
     JMP ReturnFromApplyPhysics\@
 
 OnGround\@:
@@ -161,20 +206,41 @@ OnGround\@:
     STA \2 + SPRITE_Y
 
 ReturnFromApplyPhysics\@:
+
+    .if \3 > 1
+    ; Apply the Y to the rest of the sprites
+    LDX #((\3-1) * 4)
+    LDY #(\3-1)
+ApplyToSprites\@:
+    LDA \2 + SPRITE_Y
+    CLC
+    ADC humanSpriteOffsets, y
+    STA \2 + SPRITE_Y+4,x
+    DEX
+    DEX
+    DEX
+    DEX
+    DEY
+    BPL ApplyToSprites\@
+    .endif
+    LDY #0
     .endm
 
-;| 1: movement VAriable | 2: sprite;
+;| 1: movement Variable | 2: sprite;
 Jump .macro
     ; Make sure is on the floor
     LDA \2 + SPRITE_Y
     CMP #FLOORHEIGHT
     BCC NoJump\@
 
+    ; Make sure we're not touching the floor
     AddValue \2 + SPRITE_Y, #-2
+
     LDA #LOW(JUMP_FORCE)
     STA \1 + speedY
     LDA #HIGH(JUMP_FORCE)
     STA \1 + speedY +1
+
 NoJump\@:
     .endm
 
@@ -273,8 +339,8 @@ vblankwait2:      ; Second wait for vblank, PPU is ready after this
     BPL vblankwait2
 
 
-;    LDA #%10000000   ;intensify blues
-;    STA PPUMASK
+    LDA #%10000000   ;intensify blues
+    STA PPUMASK
 
     ;Reset PPU h/l latch
     LDA PPUSTATUS
@@ -288,34 +354,37 @@ vblankwait2:      ; Second wait for vblank, PPU is ready after this
 ; Write pallet 00
     LDA #$0F
     STA PPUDATA
-    LDA #$17
+    LDA #$18
     STA PPUDATA
     LDA #$20
     STA PPUDATA
-    LDA #$39
+    LDA #$2A
     STA PPUDATA
 
 
-;--------------------- Sprite Data --------------;
-    ; Write sprite data for 0 OAM memory Object memory
-    LDA  #120       ; Y pos
-    STA  sprite_player + SPRITE_Y
+;--------------------- Player Sprite Data --------------;
 
-    LDA  #$00         ; Tile number
-    STA  sprite_player + SPRITE_TILE
+InitPlayerSprites:
 
-    LDA  #%00000000         ; Attributes ????
-    STA sprite_player + SPRITE_ATTR
+    ;legs
+    InitSpriteAtPos sprite_player, #120, #136,  #$20, #%00000000
 
-    LDA #128    ; X pos
-    STA sprite_player + SPRITE_X
+    ;body
+    InitSpriteAtPos sprite_player + 4, #120, #128,  #$10, #%00000000
+
+    ;gun
+    InitSpriteAtPos sprite_player + 8 ,#128, #128,  #$11, #%00000000
+    
+    ;head
+    InitSpriteAtPos sprite_player + 12,     #120, #120,  #$00, #%00000000
+
 
 ;--------------------- wall Data --------------;
     ; Write sprite data for 0 OAM memory Object memory
     LDA  #FLOORHEIGHT      ; Y pos
     STA  sprite_wall + SPRITE_Y
 
-    LDA  #$10         ; Tile number
+    LDA  #$30        ; Tile number
     STA  sprite_wall + SPRITE_TILE
 
     LDA  #%00000000         ; Attributes ????
@@ -430,10 +499,6 @@ LookAt_B:
     LDA joyPad1_state
     AND #BUTTON_B
     BEQ  LookAt_UP   ;Branch if equal
-    LDA sprite_player + SPRITE_X
-    CLC
-    ADC #1
-    STA sprite_player + SPRITE_X
 
 ;----------- UP BUTTON--------;
 LookAt_UP:
@@ -446,7 +511,13 @@ LookAt_LEFT:
     LDA joyPad1_state
     AND #BUTTON_LEFT
     BEQ  LookAt_RIGHT   ;Branch if equal
-    AddValue sprite_player + SPRITE_X, #-1
+
+    ;FlipPlayer Sprite
+    LDA #%01000000
+    STA sprite_player+SPRITE_ATTR
+
+    MoveAllSpritesX sprite_player, #-1, #4
+
     LDX 1
     CheckSpriteCollisionWithXReg sprite_player, #8, #8, sprite_wall, #8,#8
     LDA collisionFlag
@@ -459,12 +530,13 @@ LookAt_RIGHT:
     LDA joyPad1_state
     AND #BUTTON_RIGHT
     BEQ  LookAt_START  ;Branch if equal
-    AddValue sprite_player + SPRITE_X, #1
+    ;AddValue sprite_player + SPRITE_X, #1
 
-    LDA sprite_player+SPRITE_ATTR,X
+    MoveAllSpritesX sprite_player, #1, #4
 
-    EOR #%01000000
-    STA sprite_player+SPRITE_ATTR,X
+    ;FlipPlayer Sprite
+    LDA #%00000000
+    STA sprite_player+SPRITE_ATTR
 
     LDX 1
     CheckSpriteCollisionWithXReg sprite_player, #8, #8, sprite_wall, #8,#8
@@ -497,47 +569,70 @@ LookAt_SELECT:
 ControllerReadFinished:   
 
 ApplyPlayerPhysics:
-    ApplyPhysics player_movement, sprite_player
+    ApplyPhysics player_movement, sprite_player, #3
     RTS
 
 ;--------------------------------------SPAWNING----------------------------;
 TrySpawnBullet:
-    LDA bullet_active
+    LDA bulletFlag
+    AND #BULLET_ACTIVE
     BEQ SpawnBullet
     RTS
 
 SpawnBullet:
 
     ; Spawn a bullet
-    LDA  sprite_player + SPRITE_Y       ; Y pos
+    LDA  sprite_player + SPRITE_Y      ; Y pos
     STA  sprite_bullet + SPRITE_Y
 
-    LDA  #1         ; Tile number
+    LDA  bulletSprites         ; Tile number
     STA  sprite_bullet + SPRITE_TILE
 
-    LDA  #%00000000         ; Attributes ????
+    LDA sprite_player + SPRITE_ATTR         ; Attributes ????
     STA sprite_bullet + SPRITE_ATTR
 
     LDA sprite_player + SPRITE_X     ; X pos
     STA sprite_bullet + SPRITE_X
 
-    LDA #1
-    STA bullet_active
+    ;load bullet active flag
+    LDA sprite_player + SPRITE_ATTR
+    AND #BULLET_LEFT
+    ORA #BULLET_ACTIVE
+    STA bulletFlag
     RTS
 
 
 GameUpdate:
 
 UpdateBullet:
-    LDA bullet_active
+    LDA bulletFlag
+    AND #BULLET_ACTIVE
     BEQ UpdateEnemies
+    
+    ;Branch to move bullt in Direction
+    LDA bulletFlag
+    AND #BULLET_LEFT
+    BEQ BulletRight
+
+BulletLeft:
     LDA sprite_bullet + SPRITE_X
     SEC
     SBC #1
     STA sprite_bullet + SPRITE_X
     BCS UpdateEnemies
-    LDA #0
-    STA bullet_active
+ BulletRight:
+    LDA sprite_bullet + SPRITE_X
+    CLC
+    ADC #1
+    STA sprite_bullet + SPRITE_X
+    BCC UpdateEnemies
+
+    ;Kill bullet
+    LDA #BULLET_INACTIVE
+    STA bulletFlag
+    LDA #248
+    STA sprite_bullet + SPRITE_Y
+
     JMP UpdateEnemies
 
 
@@ -607,13 +702,12 @@ UpdateEnemiesNoCollision:
 UpdateReturnJump:
 
     Jump enemy_movement, sprite_enemy
-    ApplyPhysics enemy_movement, sprite_enemy
-    ApplyPhysics enemy_movement+5, sprite_enemy+4
-    ApplyPhysics enemy_movement+10, sprite_enemy+8
+    ApplyPhysics enemy_movement, sprite_enemy, #1
+    ApplyPhysics enemy_movement+5, sprite_enemy+4, #1
+    ApplyPhysics enemy_movement+10, sprite_enemy+8, #1
 
 
     RTS
-
 
 do_action:
        asl A
@@ -627,7 +721,18 @@ do_action:
 ;--------------------- Data tabe-------------;
 table: 
      .dw UpdateEnemiesNoCollision-1  
-
+playerSprites:
+    .db $00, $10, $20
+playerGun:
+    .db $11, $21, $01
+enemySprites:
+    .db $02, $12, $22
+enemyArm:
+    .db $13, $03, $23
+bulletSprites:
+    .db $31, $32
+humanSpriteOffsets:
+    .db -8,-8, -16, 0
 
 SPRITE
 ;;;;;;;;;;;;;;   
