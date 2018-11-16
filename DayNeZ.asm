@@ -274,26 +274,26 @@ CheckSpriteCollisionWithXReg .macro
 
     LDA \1 + SPRITE_X, x      ; load x1
     SEC
-    SBC \5          ; subtract w2
+    SBC #\5          ; subtract w2
     CMP \4 + SPRITE_X          ;compare with x2  
     BCS NoCollision\@ ; branch if x1-w2 >=
 
 
     CLC 
-    ADC \2 + \5     ; Add width 1 and width 2 to A 
+    ADC #\2 + \5     ; Add width 1 and width 2 to A 
     CMP \4 + SPRITE_X          ; compare to x2
     BCC NoCollision\@ ; branch if no collision
     
     LDA \1 + SPRITE_Y, x ; caluclate y_enemy - bullet width(y1 - h2)
     SEC
-    SBC \6                         ; assume w2 = 8
-    CMP \4+SPRITE_Y ;compare with x  bullet   
+    SBC #\6                         ; assume w2 = 8
+    CMP \4+SPRITE_Y          ;compare with x  bullet   
     BCS NoCollision\@ ; branch if x1-w2 >=
 
     CLC 
-    ADC \3+\6                    ; Calculat x_enemy + w_eneym (x1 + w1) assuming w1 = 8
+    ADC #\3+\6                    ; Calculat x_enemy + w_eneym (x1 + w1) assuming w1 = 8
     CMP \4+SPRITE_Y
-    BCS EndCollision\@ ; 
+    BCs EndCollision\@ ; 
 
 NoCollision\@
     LDA #%00000001
@@ -337,7 +337,6 @@ clrmem:
 vblankwait2:      ; Second wait for vblank, PPU is ready after this
     BIT PPUSTATUS
     BPL vblankwait2
-
 
     LDA #%10000000   ;intensify blues
     STA PPUMASK
@@ -522,7 +521,7 @@ LookAt_LEFT:
     CheckSpriteCollisionWithXReg sprite_player, #8, #8, sprite_wall, #8,#8
     LDA collisionFlag
     BNE LookAt_RIGHT
-    AddValue sprite_player + SPRITE_X, #1
+    MoveAllSpritesX sprite_player, #1, #4
 
     
 ;----------- RIGHT BUTTON--------;
@@ -539,10 +538,10 @@ LookAt_RIGHT:
     STA sprite_player+SPRITE_ATTR
 
     LDX 1
-    CheckSpriteCollisionWithXReg sprite_player, #8, #8, sprite_wall, #8,#8
+    CheckSpriteCollisionWithXReg sprite_player, #16, #24, sprite_wall, #8,#8
     LDA collisionFlag
     BNE LookAt_START
-    AddValue sprite_player + SPRITE_X, #-1
+    MoveAllSpritesX sprite_player, #-1, #4
 
 ;----------- START BUTTON--------;
 LookAt_START:
