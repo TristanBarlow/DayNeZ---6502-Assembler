@@ -325,15 +325,15 @@ CheckSpriteCollisionWithXReg .macro
     BCC NoCollision\@ ; branch if no collision
     
     LDA \1 + SPRITE_Y, x ; caluclate y_enemy - bullet width(y1 - h2)
-    SEC
-    SBC #\6 +#\8                    ; assume w2 = 8
+    CLC
+    ADC #\6 +#\8                    ; assume w2 = 8
     CMP \4+SPRITE_Y         ;compare with x  bullet   
-    BCS NoCollision\@ ; branch if x1-w2 >=
+    BCC NoCollision\@ ; branch if x1-w2 >=
 
-    CLC 
-    ADC #\3+#\6  + #\8            ; Calculat x_enemy + w_eneym (x1 + w1) assuming w1 = 8
+    SEC 
+    SBC #\3+#\6  + #\8            ; Calculat x_enemy + w_eneym (x1 + w1) assuming w1 = 8
     CMP \4+SPRITE_Y 
-    BCS EndCollision\@ ; 
+    BCC EndCollision\@ ; 
 
 NoCollision\@
     LDA #%00000001
@@ -696,7 +696,7 @@ NotDead:
     CMP #8
     BCC EnemyReverse
 
-    CheckSpriteCollisionWithXReg sprite_enemy, #8, #8, sprite_wall, #8,#8, #1,#10
+    CheckSpriteCollisionWithXReg sprite_enemy, #8, #8, sprite_wall, #8,#8, #0,#0
 
     LDA collisionFlag
     BEQ EnemyReverse
@@ -731,7 +731,7 @@ UpdateEnemiesNoReverse:
     STA sprite_enemy + SPRITE_Y, x
 
 CheckPlayerCollision:
-    CheckSpriteCollisionWithXReg sprite_enemy, #8,#8, sprite_player, #8,#16, #1,#1
+    CheckSpriteCollisionWithXReg sprite_enemy, #8,#8, sprite_player, #16,#24, #0,#0
 
     LDA collisionFlag
     BNE UpdateEnemiesNoCollision
