@@ -38,8 +38,8 @@ ENEMY_SQUAD_WIDTH = 3
 ENEMY_SQUAD_HEIGHT = 1
 NUM_ENEMIES  = ENEMY_SQUAD_HEIGHT * ENEMY_SQUAD_WIDTH
 ENEMY_SPACING = 16
-ENEMY_DECENT_SPEED = 5
 JUMP_FORCE = -(256+128)
+PLAYER_X_SPEED = 1
 
 GRAVITY  =   8     ; Sub pixel per frame 
 MAX_Y_SPEED = 20      ; pixel per frame
@@ -161,9 +161,30 @@ InitSpriteAtPos .macro
 ;| sprite to change | sprite Table | current index
 AnimateSprite .macro
     .endm
+;1: sprite  |2: numberOf Sprites
+UpdateSpritesToRoot .macro
+    .if \2 > 1
+    ; Apply the Y to the rest of the sprites
+    LDX #((\2-1) * 4)
+    LDY #(\2-1)
+ApplyToSprites\@:
+    LDA \1 + SPRITE_Y
+    CLC
+    ADC humanSpriteOffsets, y
+    STA \1 + SPRITE_Y+4,x
+    DEX
+    DEX
+    DEX
+    DEX
+    DEY
+    BPL ApplyToSprites\@
+    .endif
+    .endm
+
+
 ;|main sprie | X move | sprite Num
 MoveAllSpritesX .macro
-     ; Apply the phyics
+    ;Load in the number of sprites* size of memory
     LDX #((\3-1) * 4)
 ApplyToSprites\@:
     LDA \1 + SPRITE_X,x
@@ -192,6 +213,25 @@ ApplyPhysics .macro
     CMP #FLOORHEIGHT
     BCS OnGround\@
 
+    LDX #0
+    CheckSpriteCollisionWithXReg \2, #8,#8, sprite_wall, #8,#8, #0,#0
+    LDA collisionFlag
+    BEQ Onbarrier\@
+
+
+    JMP ReturnFromApplyPhysics\@
+
+Onbarrier\@:
+    LDA #0
+    STA \1 +speedY
+    STA \1 +speedY+1
+    STA \1 + pos
+
+
+    LDA sprite_wall + SPRITE_Y
+    SEC
+    SBC #9
+    STA \2 + SPRITE_Y
     JMP ReturnFromApplyPhysics\@
 
 OnGround\@:
@@ -206,24 +246,6 @@ OnGround\@:
     STA \2 + SPRITE_Y
 
 ReturnFromApplyPhysics\@:
-
-    .if \3 > 1
-    ; Apply the Y to the rest of the sprites
-    LDX #((\3-1) * 4)
-    LDY #(\3-1)
-ApplyToSprites\@:
-    LDA \2 + SPRITE_Y
-    CLC
-    ADC humanSpriteOffsets, y
-    STA \2 + SPRITE_Y+4,x
-    DEX
-    DEX
-    DEX
-    DEX
-    DEY
-    BPL ApplyToSprites\@
-    .endif
-    LDY #0
     .endm
 
 ;| 1: movement Variable | 2: sprite;
@@ -242,6 +264,24 @@ Jump .macro
     STA \1 + speedY +1
 
 NoJump\@:
+    .endm
+
+; This macro  checks to see if the sprite hits the 
+;side of the screen, set X to one if out of loop
+;| 1: sprite | 2: width | 3: X movement| 
+CheckForSideCollision .macro
+    LDA #%00000000
+    STA collisionFlag
+    LDA sprite_enemy + SPRITE_X, x
+    STA \1+SPRITE_X,X
+    CMP  #256 - 8 
+    BCS EnemyReverse
+    CMP #8
+    BCC EnemyReverse
+    
+HitSide@\:
+
+EndCheck@\:
     .endm
 
 GetDirection .macro 
@@ -267,39 +307,40 @@ Cap\@:
 Fin\@:
     .endm
 ; SET X REG TO 0 IF NOT IN LOOP WITH CONSTANT COLLISION SIZES
-;| 1: sprite1| 2 : w1 | 3 : h1 | 4 : sprite2 | 5 : w2 | 6 :  h2|
+;| 1: sprite1| 2 : w1 | 3 : h1 | 4 : sprite2 | 5 : w2 | 6 :  h2| 7: xMove | 8:yMove
 CheckSpriteCollisionWithXReg .macro 
     LDA #%00000000
     STA collisionFlag
 
     LDA \1 + SPRITE_X, x      ; load x1
     SEC
-    SBC #\5          ; subtract w2
+    SBC #\5 + #\7   ; subtract w2
     CMP \4 + SPRITE_X          ;compare with x2  
     BCS NoCollision\@ ; branch if x1-w2 >=
 
 
     CLC 
-    ADC #\2 + \5     ; Add width 1 and width 2 to A 
+    ADC #\2 + #\5  + #\7    ; Add width 1 and width 2 AND the x movement
     CMP \4 + SPRITE_X          ; compare to x2
     BCC NoCollision\@ ; branch if no collision
     
     LDA \1 + SPRITE_Y, x ; caluclate y_enemy - bullet width(y1 - h2)
     SEC
-    SBC #\6                         ; assume w2 = 8
-    CMP \4+SPRITE_Y          ;compare with x  bullet   
+    SBC #\6 +#\8                    ; assume w2 = 8
+    CMP \4+SPRITE_Y         ;compare with x  bullet   
     BCS NoCollision\@ ; branch if x1-w2 >=
 
     CLC 
-    ADC #\3+\6                    ; Calculat x_enemy + w_eneym (x1 + w1) assuming w1 = 8
-    CMP \4+SPRITE_Y
-    BCs EndCollision\@ ; 
+    ADC #\3+#\6  + #\8            ; Calculat x_enemy + w_eneym (x1 + w1) assuming w1 = 8
+    CMP \4+SPRITE_Y 
+    BCS EndCollision\@ ; 
 
 NoCollision\@
     LDA #%00000001
     STA collisionFlag
 EndCollision\@
     .endm
+
 
 ;----------------------------- RESET ---------------------;
 RESET:
@@ -498,6 +539,11 @@ LookAt_B:
     LDA joyPad1_state
     AND #BUTTON_B
     BEQ  LookAt_UP   ;Branch if equal
+    LDA sprite_player + SPRITE_X
+    STA sprite_wall + SPRITE_X
+    LDA sprite_player + SPRITE_Y
+    STA sprite_wall + SPRITE_Y
+
 
 ;----------- UP BUTTON--------;
 LookAt_UP:
@@ -515,13 +561,12 @@ LookAt_LEFT:
     LDA #%01000000
     STA sprite_player+SPRITE_ATTR
 
-    MoveAllSpritesX sprite_player, #-1, #4
 
-    LDX 1
-    CheckSpriteCollisionWithXReg sprite_player, #8, #8, sprite_wall, #8,#8
+    LDX #0
+    CheckSpriteCollisionWithXReg sprite_player, #8, #8, sprite_wall, #8,#8, #-1,#0
     LDA collisionFlag
-    BNE LookAt_RIGHT
-    MoveAllSpritesX sprite_player, #1, #4
+    BEQ LookAt_RIGHT
+    MoveAllSpritesX sprite_player, #-1, #4
 
     
 ;----------- RIGHT BUTTON--------;
@@ -529,19 +574,16 @@ LookAt_RIGHT:
     LDA joyPad1_state
     AND #BUTTON_RIGHT
     BEQ  LookAt_START  ;Branch if equal
-    ;AddValue sprite_player + SPRITE_X, #1
-
-    MoveAllSpritesX sprite_player, #1, #4
 
     ;FlipPlayer Sprite
     LDA #%00000000
     STA sprite_player+SPRITE_ATTR
-
-    LDX 1
-    CheckSpriteCollisionWithXReg sprite_player, #16, #24, sprite_wall, #8,#8
+    
+    LDX #0
+    CheckSpriteCollisionWithXReg sprite_player, #16, #8, sprite_wall, #8,#8,#1, #0
     LDA collisionFlag
-    BNE LookAt_START
-    MoveAllSpritesX sprite_player, #-1, #4
+    BEQ LookAt_START
+    MoveAllSpritesX sprite_player, #1, #4
 
 ;----------- START BUTTON--------;
 LookAt_START:
@@ -569,6 +611,7 @@ ControllerReadFinished:
 
 ApplyPlayerPhysics:
     ApplyPhysics player_movement, sprite_player, #3
+    UpdateSpritesToRoot sprite_player, #3
     RTS
 
 ;--------------------------------------SPAWNING----------------------------;
@@ -648,10 +691,16 @@ NotDead:
     CLC
     ADC enemy_info + enemy_speed, x
     STA sprite_enemy+SPRITE_X,X
-    CMP  #256 - ENEMY_SPACING 
+    CMP  #256 - 8 
     BCS EnemyReverse
-    CMP #ENEMY_SPACING
+    CMP #8
     BCC EnemyReverse
+
+    CheckSpriteCollisionWithXReg sprite_enemy, #8, #8, sprite_wall, #8,#8, #1,#10
+
+    LDA collisionFlag
+    BEQ EnemyReverse
+
     JMP UpdateEnemiesNoReverse
 
 EnemyReverse:
@@ -659,8 +708,6 @@ EnemyReverse:
     SignFlip
     STA enemy_info + enemy_speed, x
 
-
-    
     LDA sprite_enemy+SPRITE_ATTR,X
 
     EOR #%01000000
@@ -669,7 +716,7 @@ EnemyReverse:
 UpdateEnemiesNoReverse:
     ; check collisions
 
-    CheckSpriteCollisionWithXReg sprite_enemy, #8, #8, sprite_bullet, #8,#8
+    CheckSpriteCollisionWithXReg sprite_enemy, #8, #8, sprite_bullet, #8,#8, #0,#0
 
     LDA collisionFlag
     BNE CheckPlayerCollision
@@ -679,12 +726,12 @@ UpdateEnemiesNoReverse:
     STA enemy_info + enemyStatus, x
 
     ;Move enemy off screen
-    LDA #128
+    LDA #255
     STA sprite_enemy + SPRITE_X, x
     STA sprite_enemy + SPRITE_Y, x
 
 CheckPlayerCollision:
-    CheckSpriteCollisionWithXReg sprite_enemy, #8,#8, sprite_player, #8,#8
+    CheckSpriteCollisionWithXReg sprite_enemy, #8,#8, sprite_player, #8,#16, #1,#1
 
     LDA collisionFlag
     BNE UpdateEnemiesNoCollision
