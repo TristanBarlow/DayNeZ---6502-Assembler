@@ -529,7 +529,7 @@ vblankwait2:      ; Second wait for vblank, PPU is ready after this
     STA PPUDATA
     LDA #$1C
     STA PPUDATA
-    LDA #$07
+    LDA #$08
     STA PPUDATA
 
     ; Write Address $3F10 (sprite colour) to the ppu
@@ -613,7 +613,7 @@ InitEnemiesLoop_X:
     ; Accumlator  = temp_x here
 
     STA sprite_enemy + SPRITE_X, x
-    LDA temp_y
+    LDA #230
     STA sprite_enemy + SPRITE_Y,x
     LDA #$22 
     STA sprite_enemy + SPRITE_TILE, X
