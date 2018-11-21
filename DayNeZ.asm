@@ -40,6 +40,21 @@ NUM_ENEMIES  = ENEMY_SQUAD_HEIGHT * ENEMY_SQUAD_WIDTH
 ENEMY_SPACING = 16
 JUMP_FORCE = -(256+128)
 PLAYER_X_SPEED = 1
+E_ROOT_SPRITE_OFFSET = 16
+
+WEAPON_OFFSET = 8
+
+W_WIDTH = 8
+W_HEIGHT = 8
+
+P_WIDTH = 8
+P_HEIGHT = 24
+
+E_WIDTH = 8
+E_HEIGHT = 24
+E_X_SPEED = 1
+
+ANIM_FRAME_SPEED = 4
 
 GRAVITY  =   8     ; Sub pixel per frame 
 MAX_Y_SPEED = 20      ; pixel per frame
@@ -50,10 +65,9 @@ BULLET_INACTIVE = %00000000
 BULLET_ACTIVE   = %00000001
 BULLET_RIGHT    = %00000000
 BULLET_LEFT     = %01000000
+BULLET_SPEED    = 3
 
-
-
-
+ANIM_INACTIVE   = %00000000
 
     .rsset $0000
 joyPad1_state   .rs 1
@@ -65,6 +79,7 @@ temp_y          .rs 1
 active_sprite   .rs 1
 
 
+
     .rsset $0000
 speedY          .rs 2 ; sub pixels per frame
 speedX          .rs 2 ; sub pixels per frame
@@ -74,11 +89,22 @@ pos             .rs 1 ; sub pixel movement position
 sprite_player .rs 4 * 4
 sprite_bullet .rs 4
 sprite_wall   .rs 4
+sprite_poo    .rs 4
 sprite_enemy  .rs 4 * NUM_ENEMIES
+sprite_e_body .rs 12 * NUM_ENEMIES
 
     .rsset $0300
 enemy_movement  .rs 5 * NUM_ENEMIES
 player_movement .rs 5
+poo_movement    .rs 5
+player_anim     .rs 4
+
+
+
+    .rsset $0400
+poo_anim        .rs 4
+bullet_anim     .rs 4
+enemy_anim      .rs 4 * NUM_ENEMIES
 
     .rsset $0000
 SPRITE_Y .rs 1
@@ -89,8 +115,14 @@ SPRITE_X .rs 1
     .rsset $0000
 enemy_speed .rs 1
 enemyStatus .rs 1
-enemyWidth  .rs 1
-enemyHeight .rs 1
+enemy_health .rs 1
+enemy_blank  .rs 1
+
+    .rsset $0000
+anim_cd         .rs 1
+anim_index      .rs 1
+anim_max_index  .rs 1
+anim_status      .rs 1
 
 
 
@@ -158,10 +190,69 @@ InitSpriteAtPos .macro
     STA \1 + SPRITE_X
     .endm
 
-;| sprite to change | sprite Table | current index
-AnimateSprite .macro
+;| 1: movement| 2: sprite | 3: body |4 anim
+OutOfLoopEnemyUpdate .macro
+    Jump \1, \2
+    ApplyPhysics \1,\2
+    UpdateSpritesToRoot \2,#3, \3
+    AnimateSprite \3 + 4, enemyArm, \4 
     .endm
-;1: sprite  |2: numberOf Sprites
+
+;| sprite to change | sprite Table| anim Data |
+AnimateSprite .macro
+    ; Load in to see if we're still going to animate
+    LDA \3 + anim_status
+    BEQ EndAnim\@
+
+    ;Load number of frames left before anim change
+    LDA \3 + anim_cd
+    BMI ChangeAnim\@
+
+    ;Subtract one if frames left is still positive
+    SEC
+    SBC #1
+    STA \3 + anim_cd
+    JMP EndAnim\@
+
+
+ChangeAnim\@:
+    ;Load current index check to see if greater than max
+    LDA \3 + anim_index
+    CMP \3 + anim_max_index
+    BCS  FinishedAnim\@
+
+    ;Change sprite
+
+    ; load sprite index into y
+    LDY \3 + anim_index
+    LDA \2, y
+    STA \1 + SPRITE_TILE
+
+    INY
+    STY \3 + anim_index
+
+    ;Set anim cd back to max
+    LDA #ANIM_FRAME_SPEED
+    STA \3 + anim_cd
+    JMP EndAnim\@
+
+FinishedAnim\@:
+    ;Finished anim so set to inactive
+    LDA #0
+    STA \3 + anim_status
+    STA \3 + anim_index
+
+    LDY \3 + anim_index
+    LDA \2, y
+    STA \1 + SPRITE_TILE
+
+EndAnim\@:
+    .endm
+
+FlipSpritesWithRoot .macro
+
+    .endm
+;1: root  |2: numberOf Sprites |3: sprite Array
 UpdateSpritesToRoot .macro
     .if \2 > 1
     ; Apply the Y to the rest of the sprites
@@ -170,8 +261,28 @@ UpdateSpritesToRoot .macro
 ApplyToSprites\@:
     LDA \1 + SPRITE_Y
     CLC
-    ADC humanSpriteOffsets, y
-    STA \1 + SPRITE_Y+4,x
+    ADC humanSpriteYOffsets, y
+    STA \3 + SPRITE_Y,x
+
+    LDA \1 + SPRITE_ATTR
+    STA \3 + SPRITE_ATTR, x
+
+    AND #%01000000
+    BNE LeftFacing\@
+
+    LDA \1+SPRITE_X
+    CLC
+    ADC humanSpriteXOffsets, y
+    STA \3 + SPRITE_X,x
+    JMP FinishedXMove\@
+
+LeftFacing\@:
+    LDA \1+SPRITE_X
+    SEC
+    SBC humanSpriteXOffsets, y
+    STA \3 + SPRITE_X,x
+
+FinishedXMove\@:
     DEX
     DEX
     DEX
@@ -198,7 +309,7 @@ ApplyToSprites\@:
     BPL ApplyToSprites\@
     .endm
 
-;| 1: Movement Variable | 2: sprite  | numberOf Sprites
+;| 1: Movement Variable | 2: sprite 
 ApplyPhysics .macro 
     ; Apply Gravity
     Add16Bit \1 + speedY, GRAVITY
@@ -214,7 +325,8 @@ ApplyPhysics .macro
     BCS OnGround\@
 
     LDX #0
-    CheckSpriteCollisionWithXReg \2, #8,#8, sprite_wall, #8,#8, #0,#0
+    
+    CheckSpriteCollisionWithXReg \2, #8,#0, sprite_wall, #8,#8, #1,#0
     LDA collisionFlag
     BEQ Onbarrier\@
 
@@ -410,21 +522,36 @@ InitPlayerSprites:
     InitSpriteAtPos sprite_player, #120, #136,  #$20, #%00000000
 
     ;body
-    InitSpriteAtPos sprite_player + 4, #120, #128,  #$10, #%00000000
+    InitSpriteAtPos sprite_player + 4, #0, #00,  #$10, #%00000000
 
     ;gun
-    InitSpriteAtPos sprite_player + 8 ,#128, #128,  #$11, #%00000000
+    InitSpriteAtPos sprite_player + 8 ,#0, #0,  #$11, #%00000000
     
     ;head
-    InitSpriteAtPos sprite_player + 12,     #120, #120,  #$00, #%00000000
+    InitSpriteAtPos sprite_player + 12, #0, #0,  #$00, #%00000000
 
 
+; Init anim data for player
+    LDA #3
+    STA player_anim + anim_max_index
+
+;--------------------- Poo sprite data --------------------;
+
+    InitSpriteAtPos sprite_poo, #255,#255, #$40, #%00000000
+
+    LDA #3
+    STA poo_anim + anim_max_index
+
+;---------------- Bullet Anim Data ------------------;
+
+    LDA #3
+    STA bullet_anim + anim_max_index
 ;--------------------- wall Data --------------;
     ; Write sprite data for 0 OAM memory Object memory
     LDA  #FLOORHEIGHT      ; Y pos
     STA  sprite_wall + SPRITE_Y
 
-    LDA  #$30        ; Tile number
+    LDA  #$50        ; Tile number
     STA  sprite_wall + SPRITE_TILE
 
     LDA  #%00000000         ; Attributes ????
@@ -446,19 +573,19 @@ InitEnemiesLoop_X:
     STA sprite_enemy + SPRITE_X, x
     LDA temp_y
     STA sprite_enemy + SPRITE_Y,x
-    LDA #2 
+    LDA #$22 
     STA sprite_enemy + SPRITE_TILE, X
     LDA #%00000000   
     STA sprite_enemy+ SPRITE_ATTR, x
 
+
     STA enemy_info + enemyStatus,x
 
-    LDA #8
-    STA enemy_info + enemyHeight, x
-
-    LDA #1
+    LDA #E_X_SPEED
     STA enemy_info + enemy_speed, x
 
+    LDA #4
+    STA enemy_anim + anim_max_index,x
 
     ;Increment X by 4
     TXA
@@ -472,11 +599,38 @@ InitEnemiesLoop_X:
     STA temp_x
     BNE InitEnemiesLoop_X
 
-    LDA temp_y
-    SEC
-    SBC #ENEMY_SPACING
-    STA temp_y
-    BNE InitEnemiesLoop_Y
+
+;------- Init enemy body parts ---------;
+    LDX #(NUM_ENEMIES * 12)
+    LDY #0
+
+LoadBodySprite:
+
+    ; X and Y will be overriden they dont matter
+    LDA #0
+    STA sprite_e_body + SPRITE_X, x
+    STA sprite_e_body + SPRITE_Y,x   
+    LDA enemySprites, y
+    STA sprite_e_body + SPRITE_TILE, X
+    LDA #%00000000 
+    STA sprite_e_body+ SPRITE_ATTR, x
+
+    DEX
+    DEX
+    DEX
+    DEX
+
+    INY
+    TYA
+    CMP #3
+    BCC LoadBodySprite
+
+    LDY #0
+
+    TXA
+    BPL LoadBodySprite
+
+
 
 ;----------- End Enemy loop -------------;
 
@@ -539,6 +693,8 @@ LookAt_B:
     LDA joyPad1_state
     AND #BUTTON_B
     BEQ  LookAt_UP   ;Branch if equal
+
+    ; spawn wall
     LDA sprite_player + SPRITE_X
     STA sprite_wall + SPRITE_X
     LDA sprite_player + SPRITE_Y
@@ -549,8 +705,21 @@ LookAt_B:
 LookAt_UP:
     LDA joyPad1_state
     AND #BUTTON_UP
-    BEQ  LookAt_LEFT   ;Branch if equal
+    BEQ  LookAt_Down   ;Branch if equal
     Jump player_movement, sprite_player
+
+LookAt_Down:
+    LDA joyPad1_state
+    AND #BUTTON_DOWN
+    BEQ LookAt_LEFT
+
+    LDA sprite_player + SPRITE_X
+    STA sprite_poo + SPRITE_X
+
+    LDA sprite_player + SPRITE_Y
+    STA sprite_poo + SPRITE_Y
+
+
 ;----------- LEFT BUTTON--------;
 LookAt_LEFT:
     LDA joyPad1_state
@@ -563,11 +732,10 @@ LookAt_LEFT:
 
 
     LDX #0
-    CheckSpriteCollisionWithXReg sprite_player, #8, #8, sprite_wall, #8,#8, #-1,#0
+    CheckSpriteCollisionWithXReg sprite_player, #8, #24, sprite_wall, #8,#8, #-1,#0
     LDA collisionFlag
     BEQ LookAt_RIGHT
-    MoveAllSpritesX sprite_player, #-1, #4
-
+    AddValue sprite_player+SPRITE_X, #-1
     
 ;----------- RIGHT BUTTON--------;
 LookAt_RIGHT:
@@ -580,10 +748,10 @@ LookAt_RIGHT:
     STA sprite_player+SPRITE_ATTR
     
     LDX #0
-    CheckSpriteCollisionWithXReg sprite_player, #16, #8, sprite_wall, #8,#8,#1, #0
+    CheckSpriteCollisionWithXReg sprite_player, #8, #24, sprite_wall, #8,#8,#1, #0
     LDA collisionFlag
     BEQ LookAt_START
-    MoveAllSpritesX sprite_player, #1, #4
+    AddValue sprite_player+SPRITE_X, #1
 
 ;----------- START BUTTON--------;
 LookAt_START:
@@ -610,8 +778,16 @@ LookAt_SELECT:
 ControllerReadFinished:   
 
 ApplyPlayerPhysics:
-    ApplyPhysics player_movement, sprite_player, #3
-    UpdateSpritesToRoot sprite_player, #3
+    ApplyPhysics player_movement, sprite_player
+    UpdateSpritesToRoot sprite_player, #3, sprite_player + 4
+    AnimateSprite sprite_player + 8, playerGun, player_anim
+
+    ; Update poo stuff
+    LDA #1
+    STA poo_anim + anim_status
+    AnimateSprite sprite_poo, pooSprites, poo_anim
+    ApplyPhysics poo_movement , sprite_poo
+     
     RTS
 
 ;--------------------------------------SPAWNING----------------------------;
@@ -623,8 +799,13 @@ TrySpawnBullet:
 
 SpawnBullet:
 
+    LDA #1
+    STA player_anim + anim_status
+    STA player_anim + anim_index
+    STA player_anim + anim_cd
+    
     ; Spawn a bullet
-    LDA  sprite_player + SPRITE_Y      ; Y pos
+    LDA  sprite_player + WEAPON_OFFSET + SPRITE_Y      ; Y pos
     STA  sprite_bullet + SPRITE_Y
 
     LDA  bulletSprites         ; Tile number
@@ -633,7 +814,7 @@ SpawnBullet:
     LDA sprite_player + SPRITE_ATTR         ; Attributes ????
     STA sprite_bullet + SPRITE_ATTR
 
-    LDA sprite_player + SPRITE_X     ; X pos
+    LDA sprite_player + WEAPON_OFFSET + SPRITE_X      ; X pos
     STA sprite_bullet + SPRITE_X
 
     ;load bullet active flag
@@ -650,7 +831,10 @@ UpdateBullet:
     LDA bulletFlag
     AND #BULLET_ACTIVE
     BEQ UpdateEnemies
-    
+
+    LDA #1
+    STA bullet_anim + anim_status
+    AnimateSprite sprite_bullet, bulletSprites, bullet_anim
     ;Branch to move bullt in Direction
     LDA bulletFlag
     AND #BULLET_LEFT
@@ -659,15 +843,16 @@ UpdateBullet:
 BulletLeft:
     LDA sprite_bullet + SPRITE_X
     SEC
-    SBC #1
+    SBC #BULLET_SPEED
     STA sprite_bullet + SPRITE_X
     BCS UpdateEnemies
  BulletRight:
     LDA sprite_bullet + SPRITE_X
     CLC
-    ADC #1
+    ADC #BULLET_SPEED
     STA sprite_bullet + SPRITE_X
     BCC UpdateEnemies
+
 
     ;Kill bullet
     LDA #BULLET_INACTIVE
@@ -680,6 +865,7 @@ BulletLeft:
 
 UpdateEnemies:
     LDX #(NUM_ENEMIES-1)*4
+    LDY #(NUM_ENEMIES-1)*5
 UpdateEnemiesLoop:
     LDA enemy_info + enemyStatus, x
     BEQ NotDead
@@ -696,7 +882,7 @@ NotDead:
     CMP #8
     BCC EnemyReverse
 
-    CheckSpriteCollisionWithXReg sprite_enemy, #8, #8, sprite_wall, #8,#8, #0,#0
+    CheckSpriteCollisionWithXReg sprite_enemy, #E_WIDTH, #E_HEIGHT, sprite_wall, #8,#8, #0,#0
 
     LDA collisionFlag
     BEQ EnemyReverse
@@ -716,10 +902,11 @@ EnemyReverse:
 UpdateEnemiesNoReverse:
     ; check collisions
 
-    CheckSpriteCollisionWithXReg sprite_enemy, #8, #8, sprite_bullet, #8,#8, #0,#0
+    CheckSpriteCollisionWithXReg sprite_enemy, #E_WIDTH, #E_HEIGHT, sprite_bullet, #8,#8, #0,#0
 
     LDA collisionFlag
     BNE CheckPlayerCollision
+
 
     ; Kill enemy
     LDA #%00000001
@@ -731,13 +918,19 @@ UpdateEnemiesNoReverse:
     STA sprite_enemy + SPRITE_Y, x
 
 CheckPlayerCollision:
-    CheckSpriteCollisionWithXReg sprite_enemy, #8,#8, sprite_player, #16,#24, #0,#0
+    CheckSpriteCollisionWithXReg sprite_enemy, #E_WIDTH, E_HEIGHT, sprite_player, #P_WIDTH,#P_HEIGHT, #0,#0
 
     LDA collisionFlag
     BNE UpdateEnemiesNoCollision
-    JMP RESET
+    LDA #128
+    STA sprite_player + SPRITE_X
+    STA sprite_player + SPRITE_Y
+    
+    LDA #1
+    STA enemy_anim +anim_status,x
 
 UpdateEnemiesNoCollision:
+
     DEX
     DEX
     DEX
@@ -746,11 +939,9 @@ UpdateEnemiesNoCollision:
     JMP UpdateEnemiesLoop
 
 UpdateReturnJump:
-
-    Jump enemy_movement, sprite_enemy
-    ApplyPhysics enemy_movement, sprite_enemy, #1
-    ApplyPhysics enemy_movement+5, sprite_enemy+4, #1
-    ApplyPhysics enemy_movement+10, sprite_enemy+8, #1
+    OutOfLoopEnemyUpdate enemy_movement, sprite_enemy, sprite_e_body, enemy_anim
+    OutOfLoopEnemyUpdate enemy_movement+5, sprite_enemy+4, sprite_e_body+12, enemy_anim+4
+    OutOfLoopEnemyUpdate enemy_movement+10, sprite_enemy+8, sprite_e_body+24, enemy_anim+8
 
 
     RTS
@@ -772,13 +963,17 @@ playerSprites:
 playerGun:
     .db $11, $21, $01
 enemySprites:
-    .db $02, $12, $22
+    .db $12, $02, $13
 enemyArm:
-    .db $13, $03, $23
+    .db $13,$33, $03, $23
+pooSprites:
+    .db $40,$41,$42
 bulletSprites:
-    .db $31, $32
-humanSpriteOffsets:
-    .db -8,-8, -16, 0
+    .db $30, $31, $32
+humanSpriteYOffsets:
+    .db -8,-8, -16
+humanSpriteXOffsets:
+    .db 0,8, 0
 
 SPRITE
 ;;;;;;;;;;;;;;   
