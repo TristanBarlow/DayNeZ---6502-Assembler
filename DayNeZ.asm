@@ -94,17 +94,19 @@ sprite_enemy  .rs 4 * NUM_ENEMIES
 sprite_e_body .rs 12 * NUM_ENEMIES
 
     .rsset $0300
-enemy_movement  .rs 5 * NUM_ENEMIES
 player_movement .rs 5
 poo_movement    .rs 5
-player_anim     .rs 4
-
 
 
     .rsset $0400
+player_anim     .rs 4
 poo_anim        .rs 4
 bullet_anim     .rs 4
 enemy_anim      .rs 4 * NUM_ENEMIES
+
+    .rsset $0500
+enemy_movement  .rs 5 * NUM_ENEMIES
+enemy_m_head    .rs 5 * NUM_ENEMIES
 
     .rsset $0000
 SPRITE_Y .rs 1
@@ -190,12 +192,35 @@ InitSpriteAtPos .macro
     STA \1 + SPRITE_X
     .endm
 
-;| 1: movement| 2: sprite | 3: body |4 anim
+;| 1: movement| 2: sprite | 3: body |4 anim | 5: enemy info | 6: Enemy Head
 OutOfLoopEnemyUpdate .macro
+    LDA \5 + enemy_health
+    BMI Dead\@
+    JMP CheckForHead\@
+
+Dead\@:
+    LDA #240
+    STA \2 + SPRITE_Y
+    UpdateSpritesToRoot \2,#2, \3
+    JMP EndUpdate\@
+
+CheckForHead\@:
     Jump \1, \2
     ApplyPhysics \1,\2
+    AnimateSprite \3 + 4, enemyArm, \4
+
+    LDA \5 + enemy_health
+    CMP #1
+    BCC NoHead\@
     UpdateSpritesToRoot \2,#3, \3
-    AnimateSprite \3 + 4, enemyArm, \4 
+    JMP EndUpdate\@
+NoHead\@:
+    ;render one less
+    UpdateSpritesToRoot \2,#2, \3
+    ApplyPhysics \6, \3 + 8
+    LDA #1
+    STA \4 +anim_status
+EndUpdate\@:
     .endm
 
 ;| sprite to change | sprite Table| anim Data |
@@ -581,6 +606,9 @@ InitEnemiesLoop_X:
 
     STA enemy_info + enemyStatus,x
 
+    LDA #1
+    STA enemy_info + enemy_health, x
+
     LDA #E_X_SPEED
     STA enemy_info + enemy_speed, x
 
@@ -865,10 +893,9 @@ BulletLeft:
 
 UpdateEnemies:
     LDX #(NUM_ENEMIES-1)*4
-    LDY #(NUM_ENEMIES-1)*5
 UpdateEnemiesLoop:
-    LDA enemy_info + enemyStatus, x
-    BEQ NotDead
+    LDA enemy_info + enemy_health, x
+    BPL NotDead
     JMP UpdateEnemiesNoCollision
 
 NotDead:
@@ -907,15 +934,17 @@ UpdateEnemiesNoReverse:
     LDA collisionFlag
     BNE CheckPlayerCollision
 
+    ; Decrement enemy health
+    LDA enemy_info + enemy_health, x
+    SEC
+    SBC #1
+    STA enemy_info + enemy_health, x
 
-    ; Kill enemy
-    LDA #%00000001
-    STA enemy_info + enemyStatus, x
-
-    ;Move enemy off screen
-    LDA #255
-    STA sprite_enemy + SPRITE_X, x
-    STA sprite_enemy + SPRITE_Y, x
+    ;Kill bullet
+    LDA #BULLET_INACTIVE
+    STA bulletFlag
+    LDA #248
+    STA sprite_bullet + SPRITE_Y
 
 CheckPlayerCollision:
     CheckSpriteCollisionWithXReg sprite_enemy, #E_WIDTH, E_HEIGHT, sprite_player, #P_WIDTH,#P_HEIGHT, #0,#0
@@ -939,9 +968,9 @@ UpdateEnemiesNoCollision:
     JMP UpdateEnemiesLoop
 
 UpdateReturnJump:
-    OutOfLoopEnemyUpdate enemy_movement, sprite_enemy, sprite_e_body, enemy_anim
-    OutOfLoopEnemyUpdate enemy_movement+5, sprite_enemy+4, sprite_e_body+12, enemy_anim+4
-    OutOfLoopEnemyUpdate enemy_movement+10, sprite_enemy+8, sprite_e_body+24, enemy_anim+8
+    OutOfLoopEnemyUpdate enemy_movement, sprite_enemy, sprite_e_body, enemy_anim, enemy_info, enemy_m_head
+    OutOfLoopEnemyUpdate enemy_movement+5, sprite_enemy+4, sprite_e_body+12, enemy_anim+4 , enemy_info + 4, enemy_m_head + 4
+    OutOfLoopEnemyUpdate enemy_movement+10, sprite_enemy+8, sprite_e_body+24, enemy_anim+8, enemy_info + 8, enemy_m_head + 8
 
 
     RTS
