@@ -1,24 +1,22 @@
-    .inesprg 1   ; 1x 16KB PRG code
-    .ineschr 1   ; 1x  8KB CHR data
+    .inesprg 1   ; 1 x bank of 16KB PRG code
+    .ineschr 1   ; 1 x bank of 8KB CHR data
     .inesmap 0   ; mapper 0 = NROM, no bank swapping
     .inesmir 1   ; background mirroring
-  
-
-;;;;;;;;;;;;;;;
-
-;---------------- CONSTANT ADDRESSES -------------------
-PPUCTRL   = $2000
-PPUMASK   = $2001
-PPUSTATUS = $2002
-OAMADDR   = $2003
-OAMDATA   = $2004
-PPUSCROLL = $2005
-PPUADDR   = $2006
-PPUDATA   = $2007
-OAMDMA    = $4014
-
-JOYPAD1   = $4016
-JOYPAD2   = $4017
+    
+    .bank 0
+    .org $C000
+;------------------------------------------
+PPUCTRL     = $2000
+PPUMASK     = $2001
+PPUSTATUS   = $2002
+OAMADDR     = $2003     ; Objective attribute memory
+OAMDATA     = $2004
+PPUSCROLL   = $2005
+PPUADDR     = $2006
+PPUDATA     = $2007
+OAMDMA      = $4014
+JOYPAD1     = $4016
+JOYPAD2     = $4017
 
 BUTTON_A      = %10000000
 BUTTON_B      = %01000000
@@ -58,7 +56,7 @@ ANIM_FRAME_SPEED = 4
 
 GRAVITY  =   8     ; Sub pixel per frame 
 MAX_Y_SPEED = 20      ; pixel per frame
-FLOORHEIGHT = 220
+FLOORHEIGHT = 210
 GROUND_FRICTION = 1  ; Sub pixel per frame
 
 BULLET_INACTIVE = %00000000
@@ -77,6 +75,7 @@ collisionFlag   .rs 1
 temp_x          .rs 1
 temp_y          .rs 1
 active_sprite   .rs 1
+nametable_add   .rs 2
 
 
 
@@ -124,7 +123,7 @@ enemy_blank  .rs 1
 anim_cd         .rs 1
 anim_index      .rs 1
 anim_max_index  .rs 1
-anim_status      .rs 1
+anim_status     .rs 1
 
 
 
@@ -173,9 +172,6 @@ Add16Bit .macro
     STA \1 + 1
     .endm
 
-;|Start of sprites| number Of Sprites |
-MoveSpriteCollection
-
 ;| sprite variable | x | y | tileID | Attr| 
 InitSpriteAtPos .macro
         ; Write sprite data for 0 OAM memory Object memory
@@ -202,7 +198,7 @@ Dead\@:
     LDA #240
     STA \2 + SPRITE_Y
     UpdateSpritesToRoot \2,#2, \3
-    JMP EndUpdate\@
+    JMP DoHeadPhyscis\@
 
 CheckForHead\@:
     Jump \1, \2
@@ -217,9 +213,10 @@ CheckForHead\@:
 NoHead\@:
     ;render one less
     UpdateSpritesToRoot \2,#2, \3
-    ApplyPhysics \6, \3 + 8
     LDA #1
     STA \4 +anim_status
+DoHeadPhyscis\@:
+    ApplyPhysics \6, \3 + 8
 EndUpdate\@:
     .endm
 
@@ -274,9 +271,6 @@ FinishedAnim\@:
 EndAnim\@:
     .endm
 
-FlipSpritesWithRoot .macro
-
-    .endm
 ;1: root  |2: numberOf Sprites |3: sprite Array
 UpdateSpritesToRoot .macro
     .if \2 > 1
@@ -495,7 +489,7 @@ RESET:
 vblankwait1:       ; First wait for vblank to make sure PPU is ready
     BIT PPUSTATUS
     BPL vblankwait1
-
+    TXA
 clrmem:
     LDA #$00
     STA $0000, x
@@ -516,13 +510,29 @@ vblankwait2:      ; Second wait for vblank, PPU is ready after this
     BIT PPUSTATUS
     BPL vblankwait2
 
-    LDA #%10000000   ;intensify blues
-    STA PPUMASK
-
-    ;Reset PPU h/l latch
     LDA PPUSTATUS
 
-    ; Write Address $3F10 (Bakcground colour) to the ppu
+
+
+    ; Write Address $3F10 (background pallet) to the ppu
+    LDA #$3F
+    STA PPUADDR  
+    LDA #$00
+    STA PPUADDR
+
+
+
+;write background
+    LDA #$0F
+    STA PPUDATA
+    LDA #$00
+    STA PPUDATA
+    LDA #$1C
+    STA PPUDATA
+    LDA #$07
+    STA PPUDATA
+
+    ; Write Address $3F10 (sprite colour) to the ppu
     LDA #$3F
     STA PPUADDR  
     LDA #$10
@@ -538,6 +548,13 @@ vblankwait2:      ; Second wait for vblank, PPU is ready after this
     LDA #$2A
     STA PPUDATA
 
+    ;load nametable data
+    LDA #$20            ; write adress 
+    STA PPUADDR  
+    LDA #$00
+    STA PPUADDR
+    
+    JSR LoadNameTables
 
 ;--------------------- Player Sprite Data --------------;
 
@@ -662,11 +679,16 @@ LoadBodySprite:
 
 ;----------- End Enemy loop -------------;
 
-    LDA #%10000000  ;binary notation to Enable NMI
-    STA PPUCTRL  
-
-    LDA #%00010000  ; Enable Sprites
+    LDA #%00011000   ;intensify blues
     STA PPUMASK
+
+    LDA #%10000000   ;intensify blues
+    STA PPUCTRL
+
+
+    LDA #0
+    STA PPUSCROLL   ;se x scroll
+    STA PPUSCROLL   ;set y scroll
 
 Forever:
     JMP Forever     ;jump back to Forever, infinite loop
@@ -969,8 +991,8 @@ UpdateEnemiesNoCollision:
 
 UpdateReturnJump:
     OutOfLoopEnemyUpdate enemy_movement, sprite_enemy, sprite_e_body, enemy_anim, enemy_info, enemy_m_head
-    OutOfLoopEnemyUpdate enemy_movement+5, sprite_enemy+4, sprite_e_body+12, enemy_anim+4 , enemy_info + 4, enemy_m_head + 4
-    OutOfLoopEnemyUpdate enemy_movement+10, sprite_enemy+8, sprite_e_body+24, enemy_anim+8, enemy_info + 8, enemy_m_head + 8
+    OutOfLoopEnemyUpdate enemy_movement+5, sprite_enemy+4, sprite_e_body+12, enemy_anim+4 , enemy_info + 4, enemy_m_head + 5
+    OutOfLoopEnemyUpdate enemy_movement+10, sprite_enemy+8, sprite_e_body+24, enemy_anim+8, enemy_info + 8, enemy_m_head + 10
 
 
     RTS
@@ -984,6 +1006,83 @@ do_action:
        pha
        rts
 
+LoadNameTables:
+
+    LDA #LOW(NameTableLabel)
+    STA nametable_add
+    LDA #HIGH(NameTableLabel)
+    STA nametable_add + 1
+NameTableOuterLoop:
+    LDY #0
+NameTableInnerLoop:
+    LDA [nametable_add],y
+    BEQ NameTableEnd
+    STA PPUDATA
+    INY
+    BNE NameTableInnerLoop
+
+    INC nametable_add + 1
+    JMP NameTableOuterLoop
+NameTableEnd:
+
+    RTS
+
+
+NameTableLabel:
+    .db $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77 
+    .db $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77 
+
+    .db $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77 
+    .db $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77 
+    .db $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77 
+    .db $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77 
+
+    .db $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77 
+    .db $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77 
+    .db $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77 
+    .db $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77 
+
+    .db $76,$76,$76,$76,   $76,$76,$76,$76,   $76,$76,$76,$76,   $76,$76,$76,$76,   $76,$76,$76,$76,   $76,$76,$76,$76,   $76,$76,$76,$76,   $76,$76,$76,$76
+    .db $76,$76,$76,$76,   $76,$76,$76,$76,   $76,$76,$76,$76,   $76,$76,$76,$76,   $76,$76,$76,$76,   $76,$76,$76,$76,   $76,$76,$76,$76,   $76,$76,$76,$76
+    .db $76,$76,$76,$76,   $76,$76,$76,$76,   $76,$76,$76,$76,   $76,$76,$76,$76,   $76,$76,$76,$76,   $76,$76,$76,$76,   $76,$76,$76,$76,   $76,$76,$76,$76
+    .db $76,$76,$76,$76,   $76,$76,$76,$76,   $76,$76,$76,$76,   $76,$76,$76,$76,   $76,$76,$76,$76,   $76,$76,$76,$76,   $76,$76,$76,$76,   $76,$76,$76,$76
+
+    .db $04,$04,$04,$04,   $04,$04,$04,$04,   $05,$04,$04,$04,   $04,$04,$04,$04,   $04,$04,$04,$04,   $04,$04,$04,$04,   $04,$04,$04,$04,   $04,$04,$04,$04 
+    .db $04,$04,$04,$04,   $04,$04,$04,$04,   $05,$04,$04,$04,   $04,$04,$04,$04,   $04,$04,$04,$04,   $04,$04,$04,$04,   $04,$04,$04,$04,   $04,$04,$04,$04                      
+    .db $04,$04,$04,$04,   $04,$04,$04,$04,   $05,$04,$04,$04,   $04,$04,$04,$04,   $04,$04,$04,$04,   $04,$04,$04,$04,   $04,$04,$04,$04,   $04,$04,$04,$04 
+    .db $04,$04,$04,$04,   $04,$04,$04,$04,   $05,$04,$04,$04,   $04,$04,$04,$04,   $04,$04,$04,$04,   $04,$04,$04,$04,   $04,$04,$04,$04,   $04,$04,$04,$04 
+
+    .db $04,$05,$06,$07,   $04,$05,$06,$07,   $04,$05,$06,$07,   $04,$05,$06,$07,   $04,$05,$06,$07,   $04,$05,$06,$07,   $04,$05,$06,$07,   $04,$05,$06,$07
+    .db $15,$14,$16,$17,   $15,$14,$16,$17,   $15,$14,$16,$17,   $15,$14,$16,$17,   $15,$14,$16,$17,   $15,$14,$16,$17,   $15,$14,$16,$17,   $15,$14,$16,$17                         
+    .db $04,$05,$04,$05,   $04,$05,$04,$05,   $04,$05,$04,$05,   $04,$05,$04,$05,   $04,$05,$04,$05,   $04,$05,$04,$05,   $04,$05,$04,$05,   $04,$05,$04,$05
+    .db $15,$14,$15,$14,   $15,$14,$15,$14,   $15,$14,$15,$14,   $15,$14,$15,$14,   $15,$14,$15,$14,   $15,$14,$15,$14,   $15,$14,$15,$14,   $15,$14,$15,$14
+
+    .db $04,$05,$26,$27,   $04,$05,$26,$27,   $04,$05,$26,$27,   $04,$05,$26,$27,   $04,$05,$26,$27,   $04,$05,$26,$27,   $04,$05,$26,$27,   $04,$05,$26,$27 
+    .db $15,$14,$36,$37,   $15,$14,$36,$37,   $15,$14,$36,$37,   $15,$14,$36,$37,   $15,$14,$36,$37,   $15,$14,$36,$37,   $15,$14,$36,$37,   $15,$14,$36,$37                      
+    .db $47,$24,$25,$47,   $47,$24,$25,$47,   $47,$24,$25,$47,   $47,$24,$25,$47,   $47,$24,$25,$47,   $47,$24,$25,$47,   $47,$24,$25,$47,   $47,$24,$25,$47 
+    .db $47,$34,$35,$47,   $47,$34,$35,$47,   $47,$34,$35,$47,   $47,$34,$35,$47,   $47,$34,$35,$47,   $47,$34,$35,$47,   $47,$34,$35,$47,   $47,$34,$35,$47  
+
+    .db $54,$55,$56,$57,   $54,$55,$56,$57,   $54,$55,$56,$57,   $54,$55,$56,$57,   $54,$55,$56,$57,   $54,$55,$56,$57,   $54,$55,$56,$57,   $54,$55,$56,$57
+    .db $54,$55,$56,$57,   $54,$55,$56,$57,   $54,$55,$56,$57,   $54,$55,$56,$57,   $54,$55,$56,$57,   $54,$55,$56,$57,   $54,$55,$56,$57,   $54,$55,$56,$57
+    
+    .db $54,$55,$56,$57,   $54,$55,$56,$57,   $54,$55,$56,$57,   $54,$55,$56,$57,   $54,$55,$56,$57,   $54,$55,$56,$57,   $54,$55,$56,$57,   $54,$55,$56,$57
+    .db $54,$55,$56,$57,   $54,$55,$56,$57,   $54,$55,$56,$57,   $54,$55,$56,$57,   $54,$55,$56,$57,   $54,$55,$56,$57,   $54,$55,$56,$57,   $54,$55,$56,$57
+    .db $00
+  
+    ;--- broken window
+    .db $26,$27
+    .db $36,$37
+    ;--- window
+    .db $06,$07
+    .db $16,$17
+    ;--- wall
+    .db $04,$05
+    .db $15,$14
+    ;--- crack wall
+    .db $24,$25
+    .db $34,$35
+
+    
 ;--------------------- Data tabe-------------;
 table: 
      .dw UpdateEnemiesNoCollision-1  
