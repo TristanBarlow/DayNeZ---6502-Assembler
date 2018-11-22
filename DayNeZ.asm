@@ -34,19 +34,23 @@ COLLIDE_DOWN = %00001000
 
 S_TITLE_SCREEN = %00000001
 S_INGAME       = %00000010
+S_ENDGAME      = %00000100
 
 ENEMY_SQUAD_WIDTH = 3
 ENEMY_SQUAD_HEIGHT = 1
 NUM_ENEMIES  = ENEMY_SQUAD_HEIGHT * ENEMY_SQUAD_WIDTH
-ENEMY_SPACING = 16
-JUMP_FORCE = -(256+128)
+ENEMY_SPACING = 30
+JUMP_FORCE = -(256)
 PLAYER_X_SPEED = 1
 E_ROOT_SPRITE_OFFSET = 16
 
+NUMBER_OF_WAVES = 3
+
 WEAPON_OFFSET = 8
 
-W_WIDTH = 8
-W_HEIGHT = 8
+W_WIDTH = 16
+W_HEIGHT = 16
+W_COOLDOWN = 255
 
 P_WIDTH = 8
 P_HEIGHT = 24
@@ -81,10 +85,17 @@ temp_y          .rs 1
 active_sprite   .rs 1
 nametable_add   .rs 2
 my_state        .rs 1
+flash_cd        .rs 1
+start_cd        .rs 1
+
+
+
 player_health   .rs 1
 player_kills    .rs 1
-flash_cd        .rs 1
+player_waves    .rs 1
 
+barrier_health  .rs 1
+barrier_CD      .rs 1
 
 
     .rsset $0000
@@ -95,11 +106,12 @@ pos             .rs 1 ; sub pixel movement position
     .rsset $0200
 sprite_player .rs 4 * 4
 sprite_bullet .rs 4
-sprite_wall   .rs 4
+sprite_wall   .rs 4 * 4
 sprite_poo    .rs 4
-sprite_health .rs 4  * 3
+sprite_health .rs 4 * 3
+sprite_Wave   .rs 4 * 2
 sprite_enemy  .rs 4 * NUM_ENEMIES
-sprite_e_body .rs 12 * NUM_ENEMIES
+sprite_e_body .rs 4 * 3  * NUM_ENEMIES
 
 
     .rsset $0300
@@ -134,7 +146,6 @@ anim_cd         .rs 1
 anim_index      .rs 1
 anim_max_index  .rs 1
 anim_status     .rs 1
-
 
 
     .bank 0
@@ -367,7 +378,7 @@ ApplyPhysics .macro
 
     LDX #0
     
-    CheckSpriteCollisionWithXReg \2, #8,#0, sprite_wall, #8,#8, #1,#0
+    CheckSpriteCollisionWithXReg \2, #8,#0, sprite_wall, #W_WIDTH,#W_HEIGHT-#1, #0,#0
     LDA collisionFlag
     BEQ Onbarrier\@
 
@@ -383,7 +394,8 @@ Onbarrier\@:
 
     LDA sprite_wall + SPRITE_Y
     SEC
-    SBC #9
+
+    SBC #W_HEIGHT
     STA \2 + SPRITE_Y
     JMP ReturnFromApplyPhysics\@
 
@@ -409,7 +421,10 @@ Jump .macro
     BCC NoJump\@
 
     ; Make sure we're not touching the floor
-    AddValue \2 + SPRITE_Y, #-2
+    LDA \2 + SPRITE_Y
+    SEC 
+    SBC #2
+    STA \2 + SPRITE_Y
 
     LDA #LOW(JUMP_FORCE)
     STA \1 + speedY
@@ -571,6 +586,8 @@ vblankwait2:      ; Second wait for vblank, PPU is ready after this
     
     JSR LoadNameTables
 
+    LDA #S_TITLE_SCREEN
+    STA my_state
     JSR InitStartScreen
 
     LDA #%00011000   ;intensify blues
@@ -579,6 +596,8 @@ vblankwait2:      ; Second wait for vblank, PPU is ready after this
     LDA #%10000000   ;intensify blues
     STA PPUCTRL
 
+    LDA #200
+    STA start_cd
 
     LDA #0
     STA PPUSCROLL   ;se x scroll
@@ -591,22 +610,42 @@ Forever:
 ;------------------------------- GAME UPDATE -------------------------;
 NMI:
 
+    ; Make sure we're reading controler inputs
+    JSR UpdateController
+
+    ;First check state for in game as this is most likely
+    ; And when performance matters most
     LDA my_state
     AND #S_INGAME
-    BEQ TitleScreen
+    BNE InGame
+
+    ;Check to see if we're still on a start cool down
+    LDA start_cd
+    CMP #1
+    BCC OnStartCD
+    DEC start_cd
+    JMP EndNMI
+OnStartCD:
+    ;We know we're not in game so check for title screen
+    LDA my_state
+    AND #S_TITLE_SCREEN
+    BNE TitleScreen
+
+    JMP EndGame
 
 ;-------- In game -----;
-
+InGame:
 ; INGAME CONTROLS
     JSR InGameRead
 ; Perform game update
     JSR GameUpdate
 
+    JSR UpdateBarrier
+
     JMP EndNMI
 
 TitleScreen:
     JSR FlashMessageSprites
-    JSR UpdateController
     LDA joyPad1_state
     AND #BUTTON_A
     BEQ  EndNMI   ;Branch if equal
@@ -614,6 +653,16 @@ TitleScreen:
     STA my_state
     JSR InitGame
 
+    JMP EndNMI
+
+EndGame:
+    JSR FlashMessageSprites
+    LDA joyPad1_state
+    AND #BUTTON_A
+    BEQ  EndNMI   ;Branch if equal
+    LDA #S_TITLE_SCREEN
+    STA my_state
+    JMP RESET
 
 EndNMI:
     ;copy sprite data to the ppu#
@@ -642,12 +691,36 @@ LookAt_B:
     AND #BUTTON_B
     BEQ  LookAt_UP   ;Branch if equal
 
-    ; spawn wall
-    LDA sprite_player + SPRITE_X
+    ;If Barrier is on CD dont spawn look at next
+    LDA barrier_CD
+    CMP #1
+    BCS LookAt_UP
+
+    LDA sprite_player + SPRITE_ATTR
+    AND #%01000000
+    BNE SpawnWallLeft
+    LDA sprite_player + 8 + SPRITE_X
+    CLC
+    ADC #5
+    JMP SpawnWall
+SpawnWallLeft:
+    LDA sprite_player + 8 + SPRITE_X
+    SEC
+    SBC #W_HEIGHT
+
+SpawnWall:
+    ; set sprite wall x
     STA sprite_wall + SPRITE_X
-    LDA sprite_player + SPRITE_Y
+
+    LDA #FLOORHEIGHT 
     STA sprite_wall + SPRITE_Y
 
+    ;Set barrier on cool down
+    LDA #W_COOLDOWN
+    STA barrier_CD
+
+    ;If spawn a wall do nothing else this read
+    JMP ControllerReadFinished
 
 ;----------- UP BUTTON--------;
 LookAt_UP:
@@ -678,13 +751,13 @@ LookAt_LEFT:
     LDA #%01000000
     STA sprite_player+SPRITE_ATTR
 
+    DEC sprite_player + SPRITE_X
 
     LDX #0
-    CheckSpriteCollisionWithXReg sprite_player, #8, #24, sprite_wall, #8,#8, #-1,#0
+    CheckSpriteCollisionWithXReg sprite_player, #8, #24, sprite_wall, #W_WIDTH, #W_HEIGHT -#1, #0,#0
     LDA collisionFlag
-    BEQ LookAt_RIGHT
-    AddValue sprite_player+SPRITE_X, #-1
-    
+    BNE LookAt_RIGHT
+    INC sprite_player + SPRITE_X    
 ;----------- RIGHT BUTTON--------;
 LookAt_RIGHT:
     LDA joyPad1_state
@@ -694,12 +767,13 @@ LookAt_RIGHT:
     ;FlipPlayer Sprite
     LDA #%00000000
     STA sprite_player+SPRITE_ATTR
-    
+
+    INC sprite_player + SPRITE_X
     LDX #0
-    CheckSpriteCollisionWithXReg sprite_player, #8, #24, sprite_wall, #8,#8,#1, #0
+    CheckSpriteCollisionWithXReg sprite_player, #8, #24, sprite_wall, #W_WIDTH, #W_HEIGHT -#1,#0, #0
     LDA collisionFlag
-    BEQ LookAt_START
-    AddValue sprite_player+SPRITE_X, #1
+    BNE LookAt_START
+    DEC sprite_player + SPRITE_X
 
 ;----------- START BUTTON--------;
 LookAt_START:
@@ -826,15 +900,15 @@ NotDead:
     STA sprite_enemy+SPRITE_X,X
     CMP  #256 - 8 
     BCS EnemyReverse
-    CMP #8
+    CMP #2
     BCC EnemyReverse
 
-    CheckSpriteCollisionWithXReg sprite_enemy, #E_WIDTH, #E_HEIGHT, sprite_wall, #8,#8, #0,#0
+    CheckSpriteCollisionWithXReg sprite_enemy, #E_WIDTH, #E_HEIGHT, sprite_wall, #W_WIDTH , #W_HEIGHT -#1, #0,#0
 
     LDA collisionFlag
-    BEQ EnemyReverse
+    BNE UpdateEnemiesNoReverse
 
-    JMP UpdateEnemiesNoReverse
+    JSR DamageBarrier
 
 EnemyReverse:
     LDA enemy_info + enemy_speed, x
@@ -845,6 +919,11 @@ EnemyReverse:
 
     EOR #%01000000
     STA sprite_enemy+SPRITE_ATTR,X
+
+    LDA #1
+    STA enemy_anim + anim_status, x
+
+
 
 UpdateEnemiesNoReverse:
     ; check collisions
@@ -867,11 +946,17 @@ UpdateEnemiesNoReverse:
     LDA #248
     STA sprite_bullet + SPRITE_Y
 
+    ; Check to see if the player has killed 
+    ; all the enemies
     INC player_kills
     LDA player_kills
     CMP #2*NUM_ENEMIES
     BCC CheckPlayerCollision
-    JMP RESET
+
+    LDA #0
+    STA player_kills
+
+    JSR WaveComplete
 
 CheckPlayerCollision:
     CheckSpriteCollisionWithXReg sprite_enemy, #E_WIDTH, E_HEIGHT, sprite_player, #P_WIDTH,#P_HEIGHT, #0,#0
@@ -950,7 +1035,7 @@ PlayerDamaged:
     CMP #1
     BCS PlayerNotDead
     ;Player dead
-    JMP RESET
+    JMP GameComplete
 
 PlayerNotDead:
     TAX
@@ -970,16 +1055,50 @@ InitStartScreen:
 
     ;Press A message Using sprite Enemy because we know they're
     ;going to be overridden when the game actually start
-    InitSpriteAtPos sprite_enemy, #120, #136, press_sprites, #%00000001
-    InitSpriteAtPos sprite_enemy+4, #128, #136, press_sprites+1, #%00000001
-    InitSpriteAtPos sprite_enemy+8, #136, #136, press_sprites+2, #%00000001
-    InitSpriteAtPos sprite_enemy+12, #144, #136, press_sprites+3, #%00000001
-    InitSpriteAtPos sprite_enemy+16, #152, #136, press_sprites+4, #%00000001
-    InitSpriteAtPos sprite_enemy+24, #176, #136, aSprite, #%00000001
+    InitSpriteAtPos sprite_enemy, #120, #136, press_sprites,#%000100001
+    InitSpriteAtPos sprite_enemy+4, #128, #136, press_sprites+1, #%000100001
+    InitSpriteAtPos sprite_enemy+8, #136, #136, press_sprites+2, #%000100001
+    InitSpriteAtPos sprite_enemy+12, #144, #136, press_sprites+3, #%000100001
+    InitSpriteAtPos sprite_enemy+16, #152, #136, press_sprites+4, #%000100001
+    InitSpriteAtPos sprite_enemy+24, #176, #136, aSprite, #%000100001
 
 
     RTS
 
+InitBarrier:
+    InitSpriteAtPos sprite_wall , #0, #245, wallSprites, #%00000000
+    InitSpriteAtPos sprite_wall +4, #0, #245, wallSprites+1, #%00000000
+    InitSpriteAtPos sprite_wall +8, #0, #245, wallSprites+2, #%00000000
+    InitSpriteAtPos sprite_wall +12, #0, #245, wallSprites+3, #%00000000
+    LDA #2
+    STA barrier_health
+
+    RTS
+
+UpdateBarrier:
+    UpdateSpritesToRoot sprite_wall, #3, sprite_wall+4, wallXOffsets, wallYOffsets
+    LDA barrier_CD
+    CMP #1
+    BCS Barrier_On_CD
+    RTS
+Barrier_On_CD:
+    DEC barrier_CD
+    RTS
+
+DamageBarrier:
+    LDY barrier_health
+    DEY
+    STY barrier_health
+    BNE BarrierOK
+
+    LDA #W_COOLDOWN
+    STA barrier_CD
+
+    LDA #245
+    STA sprite_wall + SPRITE_Y
+
+BarrierOK:
+    RTS
 FlashMessageSprites:
     ;load flash coold down
     LDA flash_cd
@@ -1012,6 +1131,54 @@ NoFlash:
 EndFlash:
     RTS
 
+InitWaveSprites:
+    InitSpriteAtPos sprite_Wave, #200, #10,  WaveSprites, #%00000001
+    InitSpriteAtPos sprite_Wave+4, #210, #10,  WaveSprites +1, #%00000001
+    RTS
+
+
+
+InitLoseSprites:
+    InitSpriteAtPos sprite_enemy, #120, #136, DeadSprites, #%00000001
+    InitSpriteAtPos sprite_enemy+4, #128, #136, DeadSprites+1, #%00000001
+    InitSpriteAtPos sprite_enemy+8, #136, #136, DeadSprites+2, #%00000001
+    InitSpriteAtPos sprite_enemy+12, #144, #136, DeadSprites+3, #%00000001
+    RTS
+
+InitWinSprites:
+    InitSpriteAtPos sprite_enemy, #120, #136, GGsprites, #%00000001
+    InitSpriteAtPos sprite_enemy+4, #128, #136, GGsprites+1, #%00000001
+    RTS
+
+WaveComplete:
+    INC player_waves
+    LDA player_waves
+    CMP #NUMBER_OF_WAVES
+    BCS GameComplete
+
+    LDY player_waves
+    LDA WaveSprites + 1,y 
+    STA sprite_Wave + 4 + SPRITE_TILE
+    
+    JSR InitEnemies
+    RTS
+GameComplete:
+    LDA #S_ENDGAME
+    STA my_state
+    LDA #100
+    STA start_cd
+
+    LDA player_health
+    CMP #1
+    BCS Win
+
+    JSR InitLoseSprites
+
+    JMP Forever
+Win:
+    JSR InitWinSprites
+
+    JMP Forever
 
 InitGame:
     ;--------------------- Player Sprite Data --------------;
@@ -1038,6 +1205,9 @@ InitPlayerSprites:
     LDA #3
     STA player_health
 
+    LDA #0
+    STA player_waves
+
     InitSpriteAtPos sprite_health, #10, #10,  HeartSprite, #%00000001
     InitSpriteAtPos sprite_health+4, #20, #10,  HeartSprite, #%00000001
     InitSpriteAtPos sprite_health+8, #30, #10,  HeartSprite, #%00000001
@@ -1055,19 +1225,20 @@ InitPlayerSprites:
     STA bullet_anim + anim_max_index
 ;--------------------- wall Data --------------;
     ; Write sprite data for 0 OAM memory Object memory
-    LDA  #FLOORHEIGHT      ; Y pos
-    STA  sprite_wall + SPRITE_Y
+    JSR InitBarrier
 
-    LDA  #$50        ; Tile number
-    STA  sprite_wall + SPRITE_TILE
 
-    LDA  #%00000000         ; Attributes ????
-    STA sprite_wall + SPRITE_ATTR
 
-    LDA #128    ; X pos
-    STA sprite_wall + SPRITE_X
+;--------- Init wave sprites ------------;
+    JSR InitWaveSprites
 
-;---------------------------- Init enemies -------------------------;
+;----------- Init Enemies -------------;
+
+    JSR InitEnemies
+
+
+InitEnemies:
+    ;---------------------------- Init enemies -------------------------;
     LDX #0
     LDA #ENEMY_SQUAD_HEIGHT  * ENEMY_SPACING
     STA temp_y
@@ -1139,8 +1310,6 @@ LoadBodySprite:
 
     TXA
     BPL LoadBodySprite
-
-
 
 ;----------- End Enemy loop -------------;
     RTS
@@ -1226,13 +1395,15 @@ DeadSprites:
     .db $93, $82, $90, $93
 HeartSprite:
     .db $91
+WaveSprites:
+    .db $A0, $A1, $A2, $A3
 
 wallSprites:
-    .db $50,$51,$61,$62
+    .db $50,$51,$60,$61
 wallYOffsets:
-    .db 8,0,8
+    .db -8,0,-8
 wallXOffsets:
-    .db 0,-8,-8
+    .db 0,8,8
 humanSpriteYOffsets:
     .db -8,-8, -16
 humanSpriteXOffsets:
