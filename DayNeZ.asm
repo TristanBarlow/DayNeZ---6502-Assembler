@@ -82,6 +82,7 @@ active_sprite   .rs 1
 nametable_add   .rs 2
 my_state        .rs 1
 player_health   .rs 1
+player_kills    .rs 1
 flash_cd        .rs 1
 
 
@@ -859,11 +860,18 @@ UpdateEnemiesNoReverse:
     SBC #1
     STA enemy_info + enemy_health, x
 
+
     ;Kill bullet
     LDA #BULLET_INACTIVE
     STA bulletFlag
     LDA #248
     STA sprite_bullet + SPRITE_Y
+
+    INC player_kills
+    LDA player_kills
+    CMP #2*NUM_ENEMIES
+    BCC CheckPlayerCollision
+    JMP RESET
 
 CheckPlayerCollision:
     CheckSpriteCollisionWithXReg sprite_enemy, #E_WIDTH, E_HEIGHT, sprite_player, #P_WIDTH,#P_HEIGHT, #0,#0
@@ -1011,7 +1019,7 @@ InitGame:
 InitPlayerSprites:
 
     ;legs
-    InitSpriteAtPos sprite_player, #120, #136,  #$20, #%00000000
+    InitSpriteAtPos sprite_player, #220, #220,  #$20, #%00000000
 
     ;body
     InitSpriteAtPos sprite_player + 4, #0, #00,  #$10, #%00000000
