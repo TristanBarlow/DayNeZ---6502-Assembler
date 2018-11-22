@@ -960,7 +960,7 @@ PlayerNotDead:
     LDA #245
     STA sprite_health + SPRITE_Y, y
 
-    LDA #0
+    LDA #126
     STA sprite_player + SPRITE_X
     STA sprite_player + SPRITE_Y
 
