@@ -228,9 +228,10 @@ OutOfLoopEnemyUpdate .macro
     JMP CheckForHead\@
 
 Dead\@:
-    LDA #240
+    ApplyPhysics \1, \3 
+    LDA #248
     STA \2 + SPRITE_Y
-    UpdateSpritesToRoot \2,#2, \3, humanSpriteXOffsets, humanSpriteYOffsets
+    STA \3+4 + SPRITE_Y
     JMP DoHeadPhyscis\@
 
 CheckForHead\@:
@@ -596,7 +597,7 @@ vblankwait2:      ; Second wait for vblank, PPU is ready after this
     LDA #%10000000   ;intensify blues
     STA PPUCTRL
 
-    LDA #200
+    LDA #100
     STA start_cd
 
     LDA #0
@@ -637,6 +638,13 @@ OnStartCD:
 InGame:
 ; INGAME CONTROLS
     JSR InGameRead
+        ;Check to see if we're still on a start cool down
+    LDA start_cd
+    CMP #1
+    BCC FullGameUpdate
+    DEC start_cd
+    JMP EndNMI
+FullGameUpdate:
 ; Perform game update
     JSR GameUpdate
 
@@ -1132,6 +1140,8 @@ EndFlash:
     RTS
 
 InitWaveSprites:
+    ;Could initialise sprites in a loop, although this is code duplication, it is more efficient this way
+    ; and there is less code total
     InitSpriteAtPos sprite_Wave, #200, #10,  WaveSprites, #%00000001
     InitSpriteAtPos sprite_Wave+4, #210, #10,  WaveSprites +1, #%00000001
     RTS
@@ -1139,6 +1149,9 @@ InitWaveSprites:
 
 
 InitLoseSprites:
+
+    ;Could initialise sprites in a loop, although this is code duplication, it is more efficient this way
+    ; and there is less code total
     InitSpriteAtPos sprite_enemy, #120, #136, DeadSprites, #%00000001
     InitSpriteAtPos sprite_enemy+4, #128, #136, DeadSprites+1, #%00000001
     InitSpriteAtPos sprite_enemy+8, #136, #136, DeadSprites+2, #%00000001
@@ -1159,6 +1172,8 @@ WaveComplete:
     LDY player_waves
     LDA WaveSprites + 1,y 
     STA sprite_Wave + 4 + SPRITE_TILE
+    LDA #100
+    STA start_cd
     
     JSR InitEnemies
     RTS
