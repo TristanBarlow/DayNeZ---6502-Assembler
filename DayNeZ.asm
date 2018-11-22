@@ -32,6 +32,9 @@ COLLIDE_LEFT = %00000010
 COLLIDE_UP   = %00000100
 COLLIDE_DOWN = %00001000
 
+S_TITLE_SCREEN = %00000001
+S_INGAME       = %00000010
+
 ENEMY_SQUAD_WIDTH = 3
 ENEMY_SQUAD_HEIGHT = 1
 NUM_ENEMIES  = ENEMY_SQUAD_HEIGHT * ENEMY_SQUAD_WIDTH
@@ -66,6 +69,7 @@ BULLET_LEFT     = %01000000
 BULLET_SPEED    = 3
 
 ANIM_INACTIVE   = %00000000
+FLASH_RATE      =30
 
     .rsset $0000
 joyPad1_state   .rs 1
@@ -76,6 +80,9 @@ temp_x          .rs 1
 temp_y          .rs 1
 active_sprite   .rs 1
 nametable_add   .rs 2
+my_state        .rs 1
+player_health   .rs 1
+flash_cd        .rs 1
 
 
 
@@ -89,8 +96,10 @@ sprite_player .rs 4 * 4
 sprite_bullet .rs 4
 sprite_wall   .rs 4
 sprite_poo    .rs 4
+sprite_health .rs 4  * 3
 sprite_enemy  .rs 4 * NUM_ENEMIES
 sprite_e_body .rs 12 * NUM_ENEMIES
+
 
     .rsset $0300
 player_movement .rs 5
@@ -171,7 +180,19 @@ Add16Bit .macro
     ADC #HIGH(\2) ; DIDNT CLEAR CARRY
     STA \1 + 1
     .endm
+;| 1: value |2: times
+MultiplyY .macro
+MultiplyLoop\@:
+    TYA
+    CLC
+    ADC #\1
+    TAY
+    
+    DEX
+    CPX #1
+    BCS MultiplyLoop\@
 
+    .endm
 ;| sprite variable | x | y | tileID | Attr| 
 InitSpriteAtPos .macro
         ; Write sprite data for 0 OAM memory Object memory
@@ -197,7 +218,7 @@ OutOfLoopEnemyUpdate .macro
 Dead\@:
     LDA #240
     STA \2 + SPRITE_Y
-    UpdateSpritesToRoot \2,#2, \3
+    UpdateSpritesToRoot \2,#2, \3, humanSpriteXOffsets, humanSpriteYOffsets
     JMP DoHeadPhyscis\@
 
 CheckForHead\@:
@@ -208,11 +229,11 @@ CheckForHead\@:
     LDA \5 + enemy_health
     CMP #1
     BCC NoHead\@
-    UpdateSpritesToRoot \2,#3, \3
+    UpdateSpritesToRoot \2,#3, \3,  humanSpriteXOffsets, humanSpriteYOffsets
     JMP EndUpdate\@
 NoHead\@:
     ;render one less
-    UpdateSpritesToRoot \2,#2, \3
+    UpdateSpritesToRoot \2,#2, \3,  humanSpriteXOffsets, humanSpriteYOffsets
     LDA #1
     STA \4 +anim_status
 DoHeadPhyscis\@:
@@ -271,7 +292,7 @@ FinishedAnim\@:
 EndAnim\@:
     .endm
 
-;1: root  |2: numberOf Sprites |3: sprite Array
+;1: root  |2: numberOf Sprites |3: sprite Array|4: xOFFsets| 5: Y OFFsets
 UpdateSpritesToRoot .macro
     .if \2 > 1
     ; Apply the Y to the rest of the sprites
@@ -280,7 +301,7 @@ UpdateSpritesToRoot .macro
 ApplyToSprites\@:
     LDA \1 + SPRITE_Y
     CLC
-    ADC humanSpriteYOffsets, y
+    ADC \5, y
     STA \3 + SPRITE_Y,x
 
     LDA \1 + SPRITE_ATTR
@@ -291,14 +312,14 @@ ApplyToSprites\@:
 
     LDA \1+SPRITE_X
     CLC
-    ADC humanSpriteXOffsets, y
+    ADC \4, y
     STA \3 + SPRITE_X,x
     JMP FinishedXMove\@
 
 LeftFacing\@:
     LDA \1+SPRITE_X
     SEC
-    SBC humanSpriteXOffsets, y
+    SBC \4, y
     STA \3 + SPRITE_X,x
 
 FinishedXMove\@:
@@ -397,23 +418,6 @@ Jump .macro
 NoJump\@:
     .endm
 
-; This macro  checks to see if the sprite hits the 
-;side of the screen, set X to one if out of loop
-;| 1: sprite | 2: width | 3: X movement| 
-CheckForSideCollision .macro
-    LDA #%00000000
-    STA collisionFlag
-    LDA sprite_enemy + SPRITE_X, x
-    STA \1+SPRITE_X,X
-    CMP  #256 - 8 
-    BCS EnemyReverse
-    CMP #8
-    BCC EnemyReverse
-    
-HitSide@\:
-
-EndCheck@\:
-    .endm
 
 GetDirection .macro 
     ;Get X dir
@@ -484,12 +488,14 @@ RESET:
     INX          ; now X = 0
     STX PPUCTRL    ; disable NMI
     STX PPUMASK    ; disable rendering
-    STX $4010    ; disable DMC IRQs
+    STX $4010    ; disable DMC IRQs]
+    
 
 vblankwait1:       ; First wait for vblank to make sure PPU is ready
     BIT PPUSTATUS
     BPL vblankwait1
     TXA
+    LDX #0
 clrmem:
     LDA #$00
     STA $0000, x
@@ -505,7 +511,7 @@ clrmem:
 
     INX
     BNE clrmem
-   
+
 vblankwait2:      ; Second wait for vblank, PPU is ready after this
     BIT PPUSTATUS
     BPL vblankwait2
@@ -519,8 +525,6 @@ vblankwait2:      ; Second wait for vblank, PPU is ready after this
     STA PPUADDR  
     LDA #$00
     STA PPUADDR
-
-
 
 ;write background
     LDA #$0F
@@ -548,6 +552,16 @@ vblankwait2:      ; Second wait for vblank, PPU is ready after this
     LDA #$2A
     STA PPUDATA
 
+    ; Write pallet 01
+    LDA #$0F
+    STA PPUDATA
+    LDA #$15
+    STA PPUDATA
+    LDA #$05
+    STA PPUDATA
+    LDA #$15
+    STA PPUDATA
+
     ;load nametable data
     LDA #$20            ; write adress 
     STA PPUADDR  
@@ -556,128 +570,7 @@ vblankwait2:      ; Second wait for vblank, PPU is ready after this
     
     JSR LoadNameTables
 
-;--------------------- Player Sprite Data --------------;
-
-InitPlayerSprites:
-
-    ;legs
-    InitSpriteAtPos sprite_player, #120, #136,  #$20, #%00000000
-
-    ;body
-    InitSpriteAtPos sprite_player + 4, #0, #00,  #$10, #%00000000
-
-    ;gun
-    InitSpriteAtPos sprite_player + 8 ,#0, #0,  #$11, #%00000000
-    
-    ;head
-    InitSpriteAtPos sprite_player + 12, #0, #0,  #$00, #%00000000
-
-
-; Init anim data for player
-    LDA #3
-    STA player_anim + anim_max_index
-
-;--------------------- Poo sprite data --------------------;
-
-    InitSpriteAtPos sprite_poo, #255,#255, #$40, #%00000000
-
-    LDA #3
-    STA poo_anim + anim_max_index
-
-;---------------- Bullet Anim Data ------------------;
-
-    LDA #3
-    STA bullet_anim + anim_max_index
-;--------------------- wall Data --------------;
-    ; Write sprite data for 0 OAM memory Object memory
-    LDA  #FLOORHEIGHT      ; Y pos
-    STA  sprite_wall + SPRITE_Y
-
-    LDA  #$50        ; Tile number
-    STA  sprite_wall + SPRITE_TILE
-
-    LDA  #%00000000         ; Attributes ????
-    STA sprite_wall + SPRITE_ATTR
-
-    LDA #128    ; X pos
-    STA sprite_wall + SPRITE_X
-
-;---------------------------- Init enemies -------------------------;
-    LDX #0
-    LDA #ENEMY_SQUAD_HEIGHT  * ENEMY_SPACING
-    STA temp_y
-InitEnemiesLoop_Y:
-    LDA #ENEMY_SQUAD_WIDTH *ENEMY_SPACING
-    STA temp_x
-InitEnemiesLoop_X:
-    ; Accumlator  = temp_x here
-
-    STA sprite_enemy + SPRITE_X, x
-    LDA #230
-    STA sprite_enemy + SPRITE_Y,x
-    LDA #$22 
-    STA sprite_enemy + SPRITE_TILE, X
-    LDA #%00000000   
-    STA sprite_enemy+ SPRITE_ATTR, x
-
-
-    STA enemy_info + enemyStatus,x
-
-    LDA #1
-    STA enemy_info + enemy_health, x
-
-    LDA #E_X_SPEED
-    STA enemy_info + enemy_speed, x
-
-    LDA #4
-    STA enemy_anim + anim_max_index,x
-
-    ;Increment X by 4
-    TXA
-    CLC
-    ADC #4
-    TAX
-
-    LDA temp_x
-    SEC
-    SBC #ENEMY_SPACING
-    STA temp_x
-    BNE InitEnemiesLoop_X
-
-
-;------- Init enemy body parts ---------;
-    LDX #(NUM_ENEMIES * 12)
-    LDY #0
-
-LoadBodySprite:
-
-    ; X and Y will be overriden they dont matter
-    LDA #0
-    STA sprite_e_body + SPRITE_X, x
-    STA sprite_e_body + SPRITE_Y,x   
-    LDA enemySprites, y
-    STA sprite_e_body + SPRITE_TILE, X
-    LDA #%00000000 
-    STA sprite_e_body+ SPRITE_ATTR, x
-
-    DEX
-    DEX
-    DEX
-    DEX
-
-    INY
-    TYA
-    CMP #3
-    BCC LoadBodySprite
-
-    LDY #0
-
-    TXA
-    BPL LoadBodySprite
-
-
-
-;----------- End Enemy loop -------------;
+    JSR InitStartScreen
 
     LDA #%00011000   ;intensify blues
     STA PPUMASK
@@ -697,12 +590,31 @@ Forever:
 ;------------------------------- GAME UPDATE -------------------------;
 NMI:
 
-; Update  And Check Controller
-    JSR ControllerRead
+    LDA my_state
+    AND #S_INGAME
+    BEQ TitleScreen
 
+;-------- In game -----;
+
+; INGAME CONTROLS
+    JSR InGameRead
 ; Perform game update
     JSR GameUpdate
 
+    JMP EndNMI
+
+TitleScreen:
+    JSR FlashMessageSprites
+    JSR UpdateController
+    LDA joyPad1_state
+    AND #BUTTON_A
+    BEQ  EndNMI   ;Branch if equal
+    LDA #S_INGAME
+    STA my_state
+    JSR InitGame
+
+
+EndNMI:
     ;copy sprite data to the ppu#
     LDA #0
     STA OAMADDR
@@ -711,25 +623,10 @@ NMI:
 
     RTI
     
-;--------------------------------- CONTROLLER ----------------------------;
-ControllerRead:
-    ;Init Controller 1
-    LDA #1
-    STA JOYPAD1
-    LDA #0
-    STA JOYPAD1
+;--------------------------------- IN GAME CONTROLLER ----------------------------;
+InGameRead:
+        JSR UpdateController
 
-    ;Read joypad A is already 0
-    LDX #0
-    STX joyPad1_state
-
-ReadController:
-    LDA JOYPAD1
-    LSR A 
-    ROL joyPad1_state
-    INX
-    CPX #8
-    BNE ReadController
 
 ;----------- A BUTTON--------;
     LDA joyPad1_state
@@ -829,7 +726,7 @@ ControllerReadFinished:
 
 ApplyPlayerPhysics:
     ApplyPhysics player_movement, sprite_player
-    UpdateSpritesToRoot sprite_player, #3, sprite_player + 4
+    UpdateSpritesToRoot sprite_player, #3, sprite_player + 4,  humanSpriteXOffsets, humanSpriteYOffsets
     AnimateSprite sprite_player + 8, playerGun, player_anim
 
     ; Update poo stuff
@@ -973,9 +870,8 @@ CheckPlayerCollision:
 
     LDA collisionFlag
     BNE UpdateEnemiesNoCollision
-    LDA #128
-    STA sprite_player + SPRITE_X
-    STA sprite_player + SPRITE_Y
+
+    JSR PlayerDamaged
     
     LDA #1
     STA enemy_anim +anim_status,x
@@ -996,15 +892,26 @@ UpdateReturnJump:
 
 
     RTS
+UpdateController:
+    ;Init Controller 1
+    LDA #1
+    STA JOYPAD1
+    LDA #0
+    STA JOYPAD1
 
-do_action:
-       asl A
-       tax
-       lda table+1,x
-       pha
-       lda table,x
-       pha
-       rts
+    ;Read joypad A is already 0
+    LDX #0
+    STX joyPad1_state
+
+    ReadController:
+    LDA JOYPAD1
+    LSR A 
+    ROL joyPad1_state
+    INX
+    CPX #8
+    BNE ReadController
+
+    RTS
 
 LoadNameTables:
 
@@ -1024,9 +931,211 @@ NameTableInnerLoop:
     INC nametable_add + 1
     JMP NameTableOuterLoop
 NameTableEnd:
+    RTS
+
+PlayerDamaged:
+    LDA player_health
+    SEC
+    SBC #1
+    STA player_health
+
+    CMP #1
+    BCS PlayerNotDead
+    ;Player dead
+    JMP RESET
+
+PlayerNotDead:
+    TAX
+    LDY #0
+    MultiplyY #4
+
+    LDA #245
+    STA sprite_health + SPRITE_Y, y
+
+    LDA #0
+    STA sprite_player + SPRITE_X
+    STA sprite_player + SPRITE_Y
 
     RTS
 
+InitStartScreen:
+
+    ;Press A message Using sprite Enemy because we know they're
+    ;going to be overridden when the game actually start
+    InitSpriteAtPos sprite_enemy, #120, #136, press_sprites, #%00000001
+    InitSpriteAtPos sprite_enemy+4, #128, #136, press_sprites+1, #%00000001
+    InitSpriteAtPos sprite_enemy+8, #136, #136, press_sprites+2, #%00000001
+    InitSpriteAtPos sprite_enemy+12, #144, #136, press_sprites+3, #%00000001
+    InitSpriteAtPos sprite_enemy+16, #152, #136, press_sprites+4, #%00000001
+    InitSpriteAtPos sprite_enemy+24, #176, #136, aSprite, #%00000001
+
+
+    RTS
+
+FlashMessageSprites:
+    ;load flash coold down
+    LDA flash_cd
+
+    ;branch if it not time to switch flash
+    BNE NoFlash
+    
+    ;Load in current sprite attribute and flip it
+    LDA sprite_enemy + SPRITE_ATTR
+    EOR #%00100000
+
+    ;Put the pallet back to 1 (messgae pallet)
+    ORA #%00000001
+
+    ;Store all the new attribute in the sprites
+    STA sprite_enemy   + SPRITE_ATTR
+    STA sprite_enemy+4 + SPRITE_ATTR
+    STA sprite_enemy+8 + SPRITE_ATTR
+    STA sprite_enemy+12 + SPRITE_ATTR
+    STA sprite_enemy+16 + SPRITE_ATTR
+    STA sprite_enemy+24 + SPRITE_ATTR
+
+    ;reset cooldown
+    LDA #FLASH_RATE
+    STA flash_cd
+
+    JMP EndFlash
+NoFlash:
+    DEC flash_cd
+EndFlash:
+    RTS
+
+
+InitGame:
+    ;--------------------- Player Sprite Data --------------;
+
+InitPlayerSprites:
+
+    ;legs
+    InitSpriteAtPos sprite_player, #120, #136,  #$20, #%00000000
+
+    ;body
+    InitSpriteAtPos sprite_player + 4, #0, #00,  #$10, #%00000000
+
+    ;gun
+    InitSpriteAtPos sprite_player + 8 ,#0, #0,  #$11, #%00000000
+    
+    ;head
+    InitSpriteAtPos sprite_player + 12, #0, #0,  #$00, #%00000000
+
+
+; Init anim data for player
+    LDA #3
+    STA player_anim + anim_max_index
+
+    LDA #3
+    STA player_health
+
+    InitSpriteAtPos sprite_health, #10, #10,  HeartSprite, #%00000001
+    InitSpriteAtPos sprite_health+4, #20, #10,  HeartSprite, #%00000001
+    InitSpriteAtPos sprite_health+8, #30, #10,  HeartSprite, #%00000001
+
+;--------------------- Poo sprite data --------------------;
+
+    InitSpriteAtPos sprite_poo, #255,#255, #$40, #%00000000
+
+    LDA #3
+    STA poo_anim + anim_max_index
+
+;---------------- Bullet Anim Data ------------------;
+
+    LDA #3
+    STA bullet_anim + anim_max_index
+;--------------------- wall Data --------------;
+    ; Write sprite data for 0 OAM memory Object memory
+    LDA  #FLOORHEIGHT      ; Y pos
+    STA  sprite_wall + SPRITE_Y
+
+    LDA  #$50        ; Tile number
+    STA  sprite_wall + SPRITE_TILE
+
+    LDA  #%00000000         ; Attributes ????
+    STA sprite_wall + SPRITE_ATTR
+
+    LDA #128    ; X pos
+    STA sprite_wall + SPRITE_X
+
+;---------------------------- Init enemies -------------------------;
+    LDX #0
+    LDA #ENEMY_SQUAD_HEIGHT  * ENEMY_SPACING
+    STA temp_y
+InitEnemiesLoop_Y:
+    LDA #ENEMY_SQUAD_WIDTH *ENEMY_SPACING
+    STA temp_x
+InitEnemiesLoop_X:
+    ; Accumlator  = temp_x here
+
+    STA sprite_enemy + SPRITE_X, x
+    LDA #230
+    STA sprite_enemy + SPRITE_Y,x
+    LDA #$22 
+    STA sprite_enemy + SPRITE_TILE, X
+    LDA #%00000000   
+    STA sprite_enemy+ SPRITE_ATTR, x
+
+
+    STA enemy_info + enemyStatus,x
+
+    LDA #1
+    STA enemy_info + enemy_health, x
+
+    LDA #E_X_SPEED
+    STA enemy_info + enemy_speed, x
+
+    LDA #4
+    STA enemy_anim + anim_max_index,x
+
+    ;Increment X by 4
+    TXA
+    CLC
+    ADC #4
+    TAX
+
+    LDA temp_x
+    SEC
+    SBC #ENEMY_SPACING
+    STA temp_x
+    BNE InitEnemiesLoop_X
+
+
+;------- Init enemy body parts ---------;
+    LDX #(NUM_ENEMIES * 12)
+    LDY #0
+
+LoadBodySprite:
+
+    ; X and Y will be overriden they dont matter
+    LDA #0
+    STA sprite_e_body + SPRITE_X, x
+    STA sprite_e_body + SPRITE_Y,x   
+    LDA enemySprites, y
+    STA sprite_e_body + SPRITE_TILE, X
+    LDA #%00000000 
+    STA sprite_e_body+ SPRITE_ATTR, x
+
+    DEX
+    DEX
+    DEX
+    DEX
+
+    INY
+    TYA
+    CMP #3
+    BCC LoadBodySprite
+
+    LDY #0
+
+    TXA
+    BPL LoadBodySprite
+
+
+
+;----------- End Enemy loop -------------;
+    RTS
 
 NameTableLabel:
     .db $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77,   $77,$77,$77,$77 
@@ -1098,10 +1207,30 @@ pooSprites:
     .db $40,$41,$42
 bulletSprites:
     .db $30, $31, $32
+
+press_sprites:
+    .db $80,$81,$82,$83, $83
+aSprite:
+    .db $90
+GGsprites:
+    .db $92, $92
+DeadSprites:
+    .db $93, $82, $90, $93
+HeartSprite:
+    .db $91
+
+wallSprites:
+    .db $50,$51,$61,$62
+wallYOffsets:
+    .db 8,0,8
+wallXOffsets:
+    .db 0,-8,-8
 humanSpriteYOffsets:
     .db -8,-8, -16
 humanSpriteXOffsets:
     .db 0,8, 0
+
+
 
 SPRITE
 ;;;;;;;;;;;;;;   
