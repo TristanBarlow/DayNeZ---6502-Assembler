@@ -109,7 +109,7 @@ barrier_CD      .rs 1
     .rsset $0200
 sprite_player .rs 4 * P_NUM_SPRITES
 sprite_bullet .rs 4
-sprite_barrier   .rs 4 * W_NUM_SPRITES
+sprite_barrier .rs 4 * W_NUM_SPRITES
 sprite_poo    .rs 4
 sprite_health .rs 4 * 3
 sprite_Wave   .rs 4 * 2
@@ -1067,7 +1067,7 @@ InitStartScreen:
     InitSpriteAtsub_pos sprite_enemy+8, #136, #136, press_sprites+2, #%000100001
     InitSpriteAtsub_pos sprite_enemy+12, #144, #136, press_sprites+3, #%000100001
     InitSpriteAtsub_pos sprite_enemy+16, #152, #136, press_sprites+4, #%000100001
-    InitSpriteAtsub_pos sprite_enemy+24, #176, #136, aSprite, #%000100001
+    InitSpriteAtsub_pos sprite_enemy+20, #176, #136, aSprite, #%000100001
 
 
     RTS
@@ -1182,7 +1182,7 @@ FlashMessageSprites:
     STA sprite_enemy+8 + SPRITE_ATTR
     STA sprite_enemy+12 + SPRITE_ATTR
     STA sprite_enemy+16 + SPRITE_ATTR
-    STA sprite_enemy+24 + SPRITE_ATTR
+    STA sprite_enemy+20 + SPRITE_ATTR
 
     ;reset cooldown
     LDA #FLASH_RATE
@@ -1211,11 +1211,19 @@ InitLoseSprites:
     InitSpriteAtsub_pos sprite_enemy+4, #128, #136, DeadSprites+1, #%00000001
     InitSpriteAtsub_pos sprite_enemy+8, #136, #136, DeadSprites+2, #%00000001
     InitSpriteAtsub_pos sprite_enemy+12, #144, #136, DeadSprites+3, #%00000001
+    LDA #248
+    STA sprite_enemy + SPRITE_Y + 16
+    STA sprite_enemy + SPRITE_Y + 20
     RTS
 
 InitWinSprites:
     InitSpriteAtsub_pos sprite_enemy, #120, #136, GGsprites, #%00000001
     InitSpriteAtsub_pos sprite_enemy+4, #128, #136, GGsprites+1, #%00000001
+    LDA #248
+    STA sprite_enemy + SPRITE_Y + 8
+    STA sprite_enemy + SPRITE_Y + 12
+    STA sprite_enemy + SPRITE_Y+ 16
+    STA sprite_enemy + SPRITE_Y+ 20
     RTS
 
 WaveComplete:
@@ -1284,7 +1292,7 @@ InitPlayerSprites:
 
 ;--------------------- Poo sprite data --------------------;
 
-    InitSpriteAtsub_pos sprite_poo, #255,#255, #$40, #%00000000
+    InitSpriteAtsub_pos sprite_poo, #126,#126, #$40, #%00000000
 
     LDA #3
     STA poo_anim + anim_max_index
@@ -1293,6 +1301,9 @@ InitPlayerSprites:
 
     LDA #3
     STA bullet_anim + anim_max_index
+
+    LDA #BULLET_FIRE_CD
+    STA player_shot_CD
 ;--------------------- wall Data --------------;
     ; Write sprite data for 0 OAM memory Object memory
     JSR InitBarrier
