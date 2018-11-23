@@ -87,9 +87,9 @@ FLASH_RATE      =30
 
     .rsset $0000
 joyPad1_state   .rs 1
-bullet_flag      .rs 1
+bullet_flag     .rs 1
 enemy_info      .rs 4 * NUM_ENEMIES
-collision_flag   .rs 1
+collision_flag  .rs 1
 temp_x          .rs 1
 temp_y          .rs 1
 active_sprite   .rs 1
@@ -242,9 +242,9 @@ vblankwait2:      ; Second wait for vblank, PPU is ready after this
     ; Write pallet 01
     LDA #$0F
     STA PPUDATA
-    LDA #$15
+    LDA #$24
     STA PPUDATA
-    LDA #$05
+    LDA #$20
     STA PPUDATA
     LDA #$15
     STA PPUDATA
@@ -328,11 +328,10 @@ TitleScreen:
     LDA joyPad1_state
     AND #BUTTON_A
     BEQ  EndNMI   ;Branch if equal
+
     LDA #S_INGAME
     STA my_state
     JSR InitGame
-
-
     JMP EndNMI
 
 EndGame:

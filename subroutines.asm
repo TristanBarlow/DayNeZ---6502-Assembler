@@ -116,20 +116,11 @@ TrySpawnBullet:
     CMP #1
     BCS GunCoolDown
 
-    ;Set the player gun pallette to normal
-    ;So we know the gun is not on cool down
-    LDA #%00000000
-    STA sprite_player + 8 + SPRITE_ATTR
 
     LDA bullet_flag
     ;Check for bullet active
     AND #BULLET_ACTIVE
     BNE NoSpawnBullet
-
-    ;Set the player gun pallette to red
-    ;So we know the gun is on cool down
-    LDA #%00000001
-    STA sprite_player + 8 + SPRITE_ATTR
 
     ;If we get here we know we have successfully shot
     LDA #BULLET_FIRE_CD
@@ -170,6 +161,12 @@ UpdateBullet:
     LDA bullet_flag
     AND #BULLET_ACTIVE
     BEQ UpdateEnemies
+
+    ;Set the player gun pallette to normal
+    ;So we know the gun is not on cool down
+    LDA sprite_player + 8 + SPRITE_ATTR
+    ORA #%000000001
+    STA sprite_player + 8 + SPRITE_ATTR
 
     LDA #1
     STA bullet_anim + anim_status
