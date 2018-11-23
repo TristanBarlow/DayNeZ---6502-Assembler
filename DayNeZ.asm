@@ -40,24 +40,31 @@ ENEMY_SQUAD_WIDTH = 3
 ENEMY_SQUAD_HEIGHT = 1
 NUM_ENEMIES  = ENEMY_SQUAD_HEIGHT * ENEMY_SQUAD_WIDTH
 ENEMY_SPACING = 30
+
+E_WIDTH = 8
+E_HEIGHT = 24
+E_X_SPEED = 1
+
+
 JUMP_FORCE = -(256)
 PLAYER_X_SPEED = 1
 E_ROOT_SPRITE_OFFSET = 16
 
 NUMBER_OF_WAVES = 3
 
+;offset into sprite that is the player gun sub_positions
 WEAPON_OFFSET = 8
 
 W_WIDTH = 16
 W_HEIGHT = 16
 W_COOLDOWN = 255
+W_NUM_SPRITES = 4
 
 P_WIDTH = 8
 P_HEIGHT = 24
+P_NUM_SPRITES = 4
 
-E_WIDTH = 8
-E_HEIGHT = 24
-E_X_SPEED = 1
+
 
 ANIM_FRAME_SPEED = 4
 
@@ -71,6 +78,7 @@ BULLET_ACTIVE   = %00000001
 BULLET_RIGHT    = %00000000
 BULLET_LEFT     = %01000000
 BULLET_SPEED    = 3
+BULLET_FIRE_CD  = 15
 
 ANIM_INACTIVE   = %00000000
 FLASH_RATE      =30
@@ -88,59 +96,62 @@ my_state        .rs 1
 flash_cd        .rs 1
 start_cd        .rs 1
 
-
-
 player_health   .rs 1
 player_kills    .rs 1
 player_waves    .rs 1
+player_shot_CD  .rs 1
 
 barrier_health  .rs 1
 barrier_CD      .rs 1
 
 
-    .rsset $0000
-speedY          .rs 2 ; sub pixels per frame
-speedX          .rs 2 ; sub pixels per frame
-pos             .rs 1 ; sub pixel movement position
-
+;Sprite variables
     .rsset $0200
-sprite_player .rs 4 * 4
+sprite_player .rs 4 * P_NUM_SPRITES
 sprite_bullet .rs 4
-sprite_wall   .rs 4 * 4
+sprite_barrier   .rs 4 * W_NUM_SPRITES
 sprite_poo    .rs 4
 sprite_health .rs 4 * 3
 sprite_Wave   .rs 4 * 2
 sprite_enemy  .rs 4 * NUM_ENEMIES
 sprite_e_body .rs 4 * 3  * NUM_ENEMIES
 
-
+;Movement variables
     .rsset $0300
 player_movement .rs 5
 poo_movement    .rs 5
+enemy_movement  .rs 5 * NUM_ENEMIES
+enemy_head_m    .rs 5 * NUM_ENEMIES
 
 
+; Animation instance variables
     .rsset $0400
 player_anim     .rs 4
 poo_anim        .rs 4
 bullet_anim     .rs 4
 enemy_anim      .rs 4 * NUM_ENEMIES
 
-    .rsset $0500
-enemy_movement  .rs 5 * NUM_ENEMIES
-enemy_m_head    .rs 5 * NUM_ENEMIES
-
+;Movement variable offsets
     .rsset $0000
-SPRITE_Y .rs 1
+speed_y          .rs 2 ; sub pixels per frame
+speed_x          .rs 2 ; sub pixels per frame
+sub_pos           .rs 1 ; sub pixel movement sub_position
+
+;Sprite variable offsets
+    .rsset $0000
+SPRITE_Y    .rs 1
 SPRITE_TILE .rs 1
 SPRITE_ATTR .rs 1
-SPRITE_X .rs 1
+SPRITE_X    .rs 1
 
+;Enemy info offsets, blank so it can loop nicely
     .rsset $0000
 enemy_speed .rs 1
 enemyStatus .rs 1
 enemy_health .rs 1
 enemy_blank  .rs 1
 
+;Animation variable offset
     .rsset $0000
 anim_cd         .rs 1
 anim_index      .rs 1
@@ -206,9 +217,9 @@ MultiplyLoop\@:
 
     .endm
 ;| sprite variable | x | y | tileID | Attr| 
-InitSpriteAtPos .macro
+InitSpriteAtsub_pos .macro
         ; Write sprite data for 0 OAM memory Object memory
-    LDA  \3       ; Y pos
+    LDA  \3       ; Y sub_pos
     STA  \1 + SPRITE_Y
 
     LDA  \4       ; Tile number
@@ -217,7 +228,7 @@ InitSpriteAtPos .macro
     LDA \5         ; Attributes ????
     STA \1 + SPRITE_ATTR
 
-    LDA \2    ; X pos
+    LDA \2    ; X sub_pos
     STA \1 + SPRITE_X
     .endm
 
@@ -264,7 +275,7 @@ AnimateSprite .macro
     LDA \3 + anim_cd
     BMI ChangeAnim\@
 
-    ;Subtract one if frames left is still positive
+    ;Subtract one if frames left is still sub_positive
     SEC
     SBC #1
     STA \3 + anim_cd
@@ -365,12 +376,12 @@ ApplyToSprites\@:
 ;| 1: Movement Variable | 2: sprite 
 ApplyPhysics .macro 
     ; Apply Gravity
-    Add16Bit \1 + speedY, GRAVITY
-    AddValue \1 + pos, \1 + speedY
+    Add16Bit \1 + speed_y, GRAVITY
+    AddValue \1 + sub_pos, \1 + speed_y
 
     ; Apply the new speed DONT CLEAR CARRY
     LDA \2 + SPRITE_Y
-    ADC \1 + speedY + 1
+    ADC \1 + speed_y + 1
     STA \2 + SPRITE_Y
 
     ;CHeck to see if its not greater than floorHeight
@@ -379,7 +390,7 @@ ApplyPhysics .macro
 
     LDX #0
     
-    CheckSpriteCollisionWithXReg \2, #8,#0, sprite_wall, #W_WIDTH,#W_HEIGHT-#1, #0,#0
+    CheckSpriteCollisionWithXReg \2, #8,#0, sprite_barrier, #W_WIDTH,#W_HEIGHT-#1, #0,#0
     LDA collisionFlag
     BEQ Onbarrier\@
 
@@ -388,12 +399,12 @@ ApplyPhysics .macro
 
 Onbarrier\@:
     LDA #0
-    STA \1 +speedY
-    STA \1 +speedY+1
-    STA \1 + pos
+    STA \1 +speed_y
+    STA \1 +speed_y+1
+    STA \1 + sub_pos
 
 
-    LDA sprite_wall + SPRITE_Y
+    LDA sprite_barrier + SPRITE_Y
     SEC
 
     SBC #W_HEIGHT
@@ -403,9 +414,9 @@ Onbarrier\@:
 OnGround\@:
     ;If the object is on the ground
     LDA #0
-    STA \1 +speedY
-    STA \1 +speedY+1
-    STA \1 + pos
+    STA \1 +speed_y
+    STA \1 +speed_y+1
+    STA \1 + sub_pos
 
 
     LDA #FLOORHEIGHT
@@ -428,9 +439,9 @@ Jump .macro
     STA \2 + SPRITE_Y
 
     LDA #LOW(JUMP_FORCE)
-    STA \1 + speedY
+    STA \1 + speed_y
     LDA #HIGH(JUMP_FORCE)
-    STA \1 + speedY +1
+    STA \1 + speed_y +1
 
 NoJump\@:
     .endm
@@ -661,6 +672,7 @@ TitleScreen:
     STA my_state
     JSR InitGame
 
+
     JMP EndNMI
 
 EndGame:
@@ -699,37 +711,8 @@ LookAt_B:
     AND #BUTTON_B
     BEQ  LookAt_UP   ;Branch if equal
 
-    ;If Barrier is on CD dont spawn look at next
-    LDA barrier_CD
-    CMP #1
-    BCS LookAt_UP
-
-    LDA sprite_player + SPRITE_ATTR
-    AND #%01000000
-    BNE SpawnWallLeft
-    LDA sprite_player + 8 + SPRITE_X
-    CLC
-    ADC #5
-    JMP SpawnWall
-SpawnWallLeft:
-    LDA sprite_player + 8 + SPRITE_X
-    SEC
-    SBC #W_HEIGHT
-
-SpawnWall:
-    ; set sprite wall x
-    STA sprite_wall + SPRITE_X
-
-    LDA #FLOORHEIGHT 
-    STA sprite_wall + SPRITE_Y
-
-    ;Set barrier on cool down
-    LDA #W_COOLDOWN
-    STA barrier_CD
-
-    ;If spawn a wall do nothing else this read
-    JMP ControllerReadFinished
-
+    JSR TryDeployBarrier
+   
 ;----------- UP BUTTON--------;
 LookAt_UP:
     LDA joyPad1_state
@@ -762,7 +745,7 @@ LookAt_LEFT:
     DEC sprite_player + SPRITE_X
 
     LDX #0
-    CheckSpriteCollisionWithXReg sprite_player, #8, #24, sprite_wall, #W_WIDTH, #W_HEIGHT -#1, #0,#0
+    CheckSpriteCollisionWithXReg sprite_player, #8, #24, sprite_barrier, #W_WIDTH, #W_HEIGHT -#1, #0,#0
     LDA collisionFlag
     BNE LookAt_RIGHT
     INC sprite_player + SPRITE_X    
@@ -778,7 +761,7 @@ LookAt_RIGHT:
 
     INC sprite_player + SPRITE_X
     LDX #0
-    CheckSpriteCollisionWithXReg sprite_player, #8, #24, sprite_wall, #W_WIDTH, #W_HEIGHT -#1,#0, #0
+    CheckSpriteCollisionWithXReg sprite_player, #8, #24, sprite_barrier, #W_WIDTH, #W_HEIGHT -#1,#0, #0
     LDA collisionFlag
     BNE LookAt_START
     DEC sprite_player + SPRITE_X
@@ -823,11 +806,17 @@ ApplyPlayerPhysics:
 ;--------------------------------------SPAWNING----------------------------;
 TrySpawnBullet:
     LDA bulletFlag
+    ;Check for bullet active
     AND #BULLET_ACTIVE
-    BEQ SpawnBullet
-    RTS
+    BNE NoSpawnBullet
 
-SpawnBullet:
+    LDA player_shot_CD
+    CMP #1
+    BCS GunCoolDown
+
+    ;If we get here we know we have successfully shot
+    LDA #BULLET_FIRE_CD
+    STA player_shot_CD
 
     LDA #1
     STA player_anim + anim_status
@@ -835,7 +824,7 @@ SpawnBullet:
     STA player_anim + anim_cd
     
     ; Spawn a bullet
-    LDA  sprite_player + WEAPON_OFFSET + SPRITE_Y      ; Y pos
+    LDA  sprite_player + WEAPON_OFFSET + SPRITE_Y      ; Y sub_pos
     STA  sprite_bullet + SPRITE_Y
 
     LDA  bulletSprites         ; Tile number
@@ -844,7 +833,7 @@ SpawnBullet:
     LDA sprite_player + SPRITE_ATTR         ; Attributes ????
     STA sprite_bullet + SPRITE_ATTR
 
-    LDA sprite_player + WEAPON_OFFSET + SPRITE_X      ; X pos
+    LDA sprite_player + WEAPON_OFFSET + SPRITE_X      ; X sub_pos
     STA sprite_bullet + SPRITE_X
 
     ;load bullet active flag
@@ -853,7 +842,10 @@ SpawnBullet:
     ORA #BULLET_ACTIVE
     STA bulletFlag
     RTS
-
+GunCoolDown:
+    DEC player_shot_CD
+NoSpawnBullet:
+    RTS
 
 GameUpdate:
 
@@ -911,7 +903,7 @@ NotDead:
     CMP #2
     BCC EnemyReverse
 
-    CheckSpriteCollisionWithXReg sprite_enemy, #E_WIDTH, #E_HEIGHT, sprite_wall, #W_WIDTH , #W_HEIGHT -#1, #0,#0
+    CheckSpriteCollisionWithXReg sprite_enemy, #E_WIDTH, #E_HEIGHT, sprite_barrier, #W_WIDTH , #W_HEIGHT -#1, #0,#0
 
     LDA collisionFlag
     BNE UpdateEnemiesNoReverse
@@ -987,9 +979,9 @@ UpdateEnemiesNoCollision:
     JMP UpdateEnemiesLoop
 
 UpdateReturnJump:
-    OutOfLoopEnemyUpdate enemy_movement, sprite_enemy, sprite_e_body, enemy_anim, enemy_info, enemy_m_head
-    OutOfLoopEnemyUpdate enemy_movement+5, sprite_enemy+4, sprite_e_body+12, enemy_anim+4 , enemy_info + 4, enemy_m_head + 5
-    OutOfLoopEnemyUpdate enemy_movement+10, sprite_enemy+8, sprite_e_body+24, enemy_anim+8, enemy_info + 8, enemy_m_head + 10
+    OutOfLoopEnemyUpdate enemy_movement, sprite_enemy, sprite_e_body, enemy_anim, enemy_info, enemy_head_m
+    OutOfLoopEnemyUpdate enemy_movement+5, sprite_enemy+4, sprite_e_body+12, enemy_anim+4 , enemy_info + 4, enemy_head_m + 5
+    OutOfLoopEnemyUpdate enemy_movement+10, sprite_enemy+8, sprite_e_body+24, enemy_anim+8, enemy_info + 8, enemy_head_m + 10
 
 
     RTS
@@ -1035,23 +1027,30 @@ NameTableEnd:
     RTS
 
 PlayerDamaged:
+
+
     LDA player_health
     SEC
     SBC #1
     STA player_health
 
-    CMP #1
-    BCS PlayerNotDead
-    ;Player dead
-    JMP GameComplete
-
-PlayerNotDead:
     TAX
     LDY #0
     MultiplyY #4
 
     LDA #245
     STA sprite_health + SPRITE_Y, y
+
+    ;Check for player dead
+    LDA player_health
+    CMP #1
+    BCS PlayerNotDead
+    ;Player dead
+    JMP GameComplete
+
+PlayerNotDead:
+    LDA #100
+    STA start_cd
 
     LDA #126
     STA sprite_player + SPRITE_X
@@ -1063,28 +1062,71 @@ InitStartScreen:
 
     ;Press A message Using sprite Enemy because we know they're
     ;going to be overridden when the game actually start
-    InitSpriteAtPos sprite_enemy, #120, #136, press_sprites,#%000100001
-    InitSpriteAtPos sprite_enemy+4, #128, #136, press_sprites+1, #%000100001
-    InitSpriteAtPos sprite_enemy+8, #136, #136, press_sprites+2, #%000100001
-    InitSpriteAtPos sprite_enemy+12, #144, #136, press_sprites+3, #%000100001
-    InitSpriteAtPos sprite_enemy+16, #152, #136, press_sprites+4, #%000100001
-    InitSpriteAtPos sprite_enemy+24, #176, #136, aSprite, #%000100001
+    InitSpriteAtsub_pos sprite_enemy, #120, #136, press_sprites,#%000100001
+    InitSpriteAtsub_pos sprite_enemy+4, #128, #136, press_sprites+1, #%000100001
+    InitSpriteAtsub_pos sprite_enemy+8, #136, #136, press_sprites+2, #%000100001
+    InitSpriteAtsub_pos sprite_enemy+12, #144, #136, press_sprites+3, #%000100001
+    InitSpriteAtsub_pos sprite_enemy+16, #152, #136, press_sprites+4, #%000100001
+    InitSpriteAtsub_pos sprite_enemy+24, #176, #136, aSprite, #%000100001
 
 
     RTS
 
 InitBarrier:
-    InitSpriteAtPos sprite_wall , #0, #245, wallSprites, #%00000000
-    InitSpriteAtPos sprite_wall +4, #0, #245, wallSprites+1, #%00000000
-    InitSpriteAtPos sprite_wall +8, #0, #245, wallSprites+2, #%00000000
-    InitSpriteAtPos sprite_wall +12, #0, #245, wallSprites+3, #%00000000
+    InitSpriteAtsub_pos sprite_barrier , #0, #245, barrier_sprites, #%00000000
+    InitSpriteAtsub_pos sprite_barrier +4, #0, #245, barrier_sprites+1, #%00000000
+    InitSpriteAtsub_pos sprite_barrier +8, #0, #245, barrier_sprites+2, #%00000000
+    InitSpriteAtsub_pos sprite_barrier +12, #0, #245, barrier_sprites+3, #%00000000
     LDA #2
     STA barrier_health
 
     RTS
 
+TryDeployBarrier:
+     ;If Barrier is on CD dont spawn look at next
+    LDA barrier_CD
+    CMP #1
+    BCS FailedToSpawnBarrier
+
+    ;reset barrier health and sprites
+    JSR InitBarrier
+
+    ;get the direction of the player and branch depending on dir
+    LDA sprite_player + SPRITE_ATTR
+    AND #%01000000
+    BNE SpawnWallLeft
+
+    ;We are facing right here so deploy right
+    LDA sprite_player + 8 + SPRITE_X
+    CLC
+    ADC #5
+    JMP SpawnWall
+
+SpawnWallLeft:
+    LDA sprite_player + 8 + SPRITE_X
+    SEC
+    SBC #W_HEIGHT
+
+SpawnWall:
+    ; set sprite wall with the value stored in A (which is directional) offset
+    STA sprite_barrier + SPRITE_X
+
+    ;Set the barrier to spawn always on the floor
+    LDA #FLOORHEIGHT 
+    STA sprite_barrier + SPRITE_Y
+
+    ;Set barrier on cool down
+    LDA #W_COOLDOWN
+    STA barrier_CD
+        
+    ;If spawn a wall do nothing else this controller input
+    JMP ControllerReadFinished
+
+FailedToSpawnBarrier:
+    RTS
+
 UpdateBarrier:
-    UpdateSpritesToRoot sprite_wall, #3, sprite_wall+4, wallXOffsets, wallYOffsets
+    UpdateSpritesToRoot sprite_barrier, #3, sprite_barrier+4, wallXOffsets, wallYOffsets
     LDA barrier_CD
     CMP #1
     BCS Barrier_On_CD
@@ -1103,9 +1145,22 @@ DamageBarrier:
     STA barrier_CD
 
     LDA #245
-    STA sprite_wall + SPRITE_Y
+    STA sprite_barrier + SPRITE_Y
 
 BarrierOK:
+
+    ; If barrier was hit and is now ok
+    ;Make the wall broken
+    LDA barrier_health
+    TAX
+    LDY #0
+    MultiplyY #4
+    LDA broken_barrier_sprites
+    STA sprite_barrier + SPRITE_TILE
+    STA sprite_barrier + SPRITE_TILE+4
+    STA sprite_barrier + SPRITE_TILE+8
+    STA sprite_barrier + SPRITE_TILE+12
+
     RTS
 FlashMessageSprites:
     ;load flash coold down
@@ -1142,8 +1197,8 @@ EndFlash:
 InitWaveSprites:
     ;Could initialise sprites in a loop, although this is code duplication, it is more efficient this way
     ; and there is less code total
-    InitSpriteAtPos sprite_Wave, #200, #10,  WaveSprites, #%00000001
-    InitSpriteAtPos sprite_Wave+4, #210, #10,  WaveSprites +1, #%00000001
+    InitSpriteAtsub_pos sprite_Wave, #200, #10,  WaveSprites, #%00000001
+    InitSpriteAtsub_pos sprite_Wave+4, #210, #10,  WaveSprites +1, #%00000001
     RTS
 
 
@@ -1152,15 +1207,15 @@ InitLoseSprites:
 
     ;Could initialise sprites in a loop, although this is code duplication, it is more efficient this way
     ; and there is less code total
-    InitSpriteAtPos sprite_enemy, #120, #136, DeadSprites, #%00000001
-    InitSpriteAtPos sprite_enemy+4, #128, #136, DeadSprites+1, #%00000001
-    InitSpriteAtPos sprite_enemy+8, #136, #136, DeadSprites+2, #%00000001
-    InitSpriteAtPos sprite_enemy+12, #144, #136, DeadSprites+3, #%00000001
+    InitSpriteAtsub_pos sprite_enemy, #120, #136, DeadSprites, #%00000001
+    InitSpriteAtsub_pos sprite_enemy+4, #128, #136, DeadSprites+1, #%00000001
+    InitSpriteAtsub_pos sprite_enemy+8, #136, #136, DeadSprites+2, #%00000001
+    InitSpriteAtsub_pos sprite_enemy+12, #144, #136, DeadSprites+3, #%00000001
     RTS
 
 InitWinSprites:
-    InitSpriteAtPos sprite_enemy, #120, #136, GGsprites, #%00000001
-    InitSpriteAtPos sprite_enemy+4, #128, #136, GGsprites+1, #%00000001
+    InitSpriteAtsub_pos sprite_enemy, #120, #136, GGsprites, #%00000001
+    InitSpriteAtsub_pos sprite_enemy+4, #128, #136, GGsprites+1, #%00000001
     RTS
 
 WaveComplete:
@@ -1201,16 +1256,16 @@ InitGame:
 InitPlayerSprites:
 
     ;legs
-    InitSpriteAtPos sprite_player, #220, #220,  #$20, #%00000000
+    InitSpriteAtsub_pos sprite_player, #220, #220,  #$20, #%00000000
 
     ;body
-    InitSpriteAtPos sprite_player + 4, #0, #00,  #$10, #%00000000
+    InitSpriteAtsub_pos sprite_player + 4, #0, #00,  #$10, #%00000000
 
     ;gun
-    InitSpriteAtPos sprite_player + 8 ,#0, #0,  #$11, #%00000000
+    InitSpriteAtsub_pos sprite_player + 8 ,#0, #0,  #$11, #%00000000
     
     ;head
-    InitSpriteAtPos sprite_player + 12, #0, #0,  #$00, #%00000000
+    InitSpriteAtsub_pos sprite_player + 12, #0, #0,  #$00, #%00000000
 
 
 ; Init anim data for player
@@ -1223,13 +1278,13 @@ InitPlayerSprites:
     LDA #0
     STA player_waves
 
-    InitSpriteAtPos sprite_health, #10, #10,  HeartSprite, #%00000001
-    InitSpriteAtPos sprite_health+4, #20, #10,  HeartSprite, #%00000001
-    InitSpriteAtPos sprite_health+8, #30, #10,  HeartSprite, #%00000001
+    InitSpriteAtsub_pos sprite_health, #10, #10,  HeartSprite, #%00000001
+    InitSpriteAtsub_pos sprite_health+4, #20, #10,  HeartSprite, #%00000001
+    InitSpriteAtsub_pos sprite_health+8, #30, #10,  HeartSprite, #%00000001
 
 ;--------------------- Poo sprite data --------------------;
 
-    InitSpriteAtPos sprite_poo, #255,#255, #$40, #%00000000
+    InitSpriteAtsub_pos sprite_poo, #255,#255, #$40, #%00000000
 
     LDA #3
     STA poo_anim + anim_max_index
@@ -1413,8 +1468,11 @@ HeartSprite:
 WaveSprites:
     .db $A0, $A1, $A2, $A3
 
-wallSprites:
+barrier_sprites:
     .db $50,$51,$60,$61
+broken_barrier_sprites:
+    .db $24,$25,$34,$35
+
 wallYOffsets:
     .db -8,0,-8
 wallXOffsets:
