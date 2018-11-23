@@ -51,21 +51,6 @@ MultiplyLoop\@:
     BCS MultiplyLoop\@
 
     .endm
-;| sprite variable | x | y | tileID | Attr| 
-InitSpriteAtsub_pos .macro
-        ; Write sprite data for 0 OAM memory Object memory
-    LDA  \3       ; Y sub_pos
-    STA  \1 + SPRITE_Y
-
-    LDA  \4       ; Tile number
-    STA  \1 + SPRITE_TILE
-
-    LDA \5         ; Attributes ????
-    STA \1 + SPRITE_ATTR
-
-    LDA \2    ; X sub_pos
-    STA \1 + SPRITE_X
-    .endm
 
 ;| 1: movement| 2: sprite | 3: body |4 anim | 5: enemy info | 6: Enemy Head
 OutOfLoopEnemyUpdate .macro
@@ -226,7 +211,7 @@ ApplyPhysics .macro
     LDX #0
     
     CheckSpriteCollisionWithXReg \2, #8,#0, sprite_barrier, #W_WIDTH,#W_HEIGHT-#1, #0,#0
-    LDA collisionFlag
+    LDA collision_flag
     BEQ Onbarrier\@
 
 
@@ -281,6 +266,29 @@ Jump .macro
 NoJump\@:
     .endm
 
+;| sprite variable | x | y | tileID | Attr| 
+InitSpriteAtPos  .macro
+        ; Write sprite data for 0 OAM memory Object memory
+    LDA  \3       ; Y sub_pos
+    STA  \1 + SPRITE_Y
+
+    LDA  \4       ; Tile number
+    STA  \1 + SPRITE_TILE
+
+    LDA \5         ; Attributes ????
+    STA \1 + SPRITE_ATTR
+
+    LDA \2    ; X sub_pos
+    STA \1 + SPRITE_X
+    .endm
+
+;|1:sprite Tiles|2: sprite array | 3: Far Left | 4: Top 
+InitFourLetterSprite .macro
+    InitSpriteAtPos \2,    #\3,   #\4,   \1,   #0 
+    InitSpriteAtPos \2+4,  #\3+8, #\4,   \1+1, #0 
+    InitSpriteAtPos \2+8,  #\3,   #\4+8, \1+2, #0 
+    InitSpriteAtPos \2+12, #\3+8, #\4+8, \1+3, #0 
+    .endm
 
 GetDirection .macro 
     ;Get X dir
@@ -308,7 +316,7 @@ Fin\@:
 ;| 1: sprite1| 2 : w1 | 3 : h1 | 4 : sprite2 | 5 : w2 | 6 :  h2| 7: xMove | 8:yMove
 CheckSpriteCollisionWithXReg .macro 
     LDA #%00000000
-    STA collisionFlag
+    STA collision_flag
 
     LDA \1 + SPRITE_X, x      ; load x1
     SEC
@@ -335,6 +343,6 @@ CheckSpriteCollisionWithXReg .macro
 
 NoCollision\@
     LDA #%00000001
-    STA collisionFlag
+    STA collision_flag
 EndCollision\@
     .endm

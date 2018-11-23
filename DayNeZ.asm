@@ -36,6 +36,8 @@ S_TITLE_SCREEN = %00000001
 S_INGAME       = %00000010
 S_ENDGAME      = %00000100
 
+INITAL_START_CD = 100
+
 ENEMY_SQUAD_WIDTH = 3
 ENEMY_SQUAD_HEIGHT = 1
 NUM_ENEMIES  = ENEMY_SQUAD_HEIGHT * ENEMY_SQUAD_WIDTH
@@ -85,9 +87,9 @@ FLASH_RATE      =30
 
     .rsset $0000
 joyPad1_state   .rs 1
-bulletFlag      .rs 1
+bullet_flag      .rs 1
 enemy_info      .rs 4 * NUM_ENEMIES
-collisionFlag   .rs 1
+collision_flag   .rs 1
 temp_x          .rs 1
 temp_y          .rs 1
 active_sprite   .rs 1
@@ -107,14 +109,14 @@ barrier_CD      .rs 1
 
 ;Sprite variables
     .rsset $0200
-sprite_player .rs 4 * P_NUM_SPRITES
-sprite_bullet .rs 4
+sprite_player  .rs 4 * P_NUM_SPRITES
+sprite_bullet  .rs 4
 sprite_barrier .rs 4 * W_NUM_SPRITES
-sprite_poo    .rs 4
-sprite_health .rs 4 * 3
-sprite_Wave   .rs 4 * 2
-sprite_enemy  .rs 4 * NUM_ENEMIES
-sprite_e_body .rs 4 * 3  * NUM_ENEMIES
+sprite_poo     .rs 4
+sprite_health  .rs 4 * 3
+sprite_Wave    .rs 4 * 2
+sprite_enemy   .rs 4 * NUM_ENEMIES
+sprite_e_body  .rs 4 * 3  * NUM_ENEMIES
 
 ;Movement variables
     .rsset $0300
@@ -255,6 +257,7 @@ vblankwait2:      ; Second wait for vblank, PPU is ready after this
     
     JSR LoadNameTables
 
+    ;Set state to title screen
     LDA #S_TITLE_SCREEN
     STA my_state
     JSR InitStartScreen
@@ -265,7 +268,7 @@ vblankwait2:      ; Second wait for vblank, PPU is ready after this
     LDA #%10000000   ;intensify blues
     STA PPUCTRL
 
-    LDA #100
+    LDA #INITAL_START_CD
     STA start_cd
 
     LDA #0

@@ -6,29 +6,29 @@ InGameRead:
 ;----------- A BUTTON--------;
     LDA joyPad1_state
     AND #BUTTON_A
-    BEQ  LookAt_B   ;Branch if equal
+    BEQ  LookAtB   ;Branch if equal
     JSR TrySpawnBullet
 
 ;----------- B BUTTON--------;
-LookAt_B:
+LookAtB:
     ;Read B Button
     LDA joyPad1_state
     AND #BUTTON_B
-    BEQ  LookAt_UP   ;Branch if equal
+    BEQ  LookAtUp   ;Branch if equal
 
     JSR TryDeployBarrier
    
 ;----------- UP BUTTON--------;
-LookAt_UP:
+LookAtUp:
     LDA joyPad1_state
     AND #BUTTON_UP
-    BEQ  LookAt_Down   ;Branch if equal
+    BEQ  LookAtDown   ;Branch if equal
     Jump player_movement, sprite_player
 
-LookAt_Down:
+LookAtDown:
     LDA joyPad1_state
     AND #BUTTON_DOWN
-    BEQ LookAt_LEFT
+    BEQ LookAtLeft
 
     LDA sprite_player + SPRITE_X
     STA sprite_poo + SPRITE_X
@@ -38,10 +38,10 @@ LookAt_Down:
 
 
 ;----------- LEFT BUTTON--------;
-LookAt_LEFT:
+LookAtLeft:
     LDA joyPad1_state
     AND #BUTTON_LEFT
-    BEQ  LookAt_RIGHT   ;Branch if equal
+    BEQ  LookAtRight   ;Branch if equal
 
     ;FlipPlayer Sprite
     LDA #%01000000
@@ -51,14 +51,14 @@ LookAt_LEFT:
 
     LDX #0
     CheckSpriteCollisionWithXReg sprite_player, #8, #24, sprite_barrier, #W_WIDTH, #W_HEIGHT -#1, #0,#0
-    LDA collisionFlag
-    BNE LookAt_RIGHT
+    LDA collision_flag
+    BNE LookAtRight
     INC sprite_player + SPRITE_X    
 ;----------- RIGHT BUTTON--------;
-LookAt_RIGHT:
+LookAtRight:
     LDA joyPad1_state
     AND #BUTTON_RIGHT
-    BEQ  LookAt_START  ;Branch if equal
+    BEQ  LookAtStart  ;Branch if equal
 
     ;FlipPlayer Sprite
     LDA #%00000000
@@ -67,15 +67,15 @@ LookAt_RIGHT:
     INC sprite_player + SPRITE_X
     LDX #0
     CheckSpriteCollisionWithXReg sprite_player, #8, #24, sprite_barrier, #W_WIDTH, #W_HEIGHT -#1,#0, #0
-    LDA collisionFlag
-    BNE LookAt_START
+    LDA collision_flag
+    BNE LookAtStart
     DEC sprite_player + SPRITE_X
 
 ;----------- START BUTTON--------;
-LookAt_START:
+LookAtStart:
     LDA joyPad1_state
     AND #BUTTON_START
-    BEQ  LookAt_SELECT   ;Branch if equal
+    BEQ LookAtSelect   ;Branch if equal
     LDA sprite_player + SPRITE_Y
     CLC
     ADC #1
@@ -83,7 +83,7 @@ LookAt_START:
 
  
 ;----------- SELECT BUTTON--------;
-LookAt_SELECT:
+LookAtSelect:
     LDA joyPad1_state
     AND #BUTTON_SELECT
     BEQ  ControllerReadFinished   ;Branch if equal
@@ -110,14 +110,26 @@ ApplyPlayerPhysics:
 
 ;--------------------------------------SPAWNING----------------------------;
 TrySpawnBullet:
-    LDA bulletFlag
+    
+    
+    LDA player_shot_CD
+    CMP #1
+    BCS GunCoolDown
+
+    ;Set the player gun pallette to normal
+    ;So we know the gun is not on cool down
+    LDA #%00000000
+    STA sprite_player + 8 + SPRITE_ATTR
+
+    LDA bullet_flag
     ;Check for bullet active
     AND #BULLET_ACTIVE
     BNE NoSpawnBullet
 
-    LDA player_shot_CD
-    CMP #1
-    BCS GunCoolDown
+    ;Set the player gun pallette to red
+    ;So we know the gun is on cool down
+    LDA #%00000001
+    STA sprite_player + 8 + SPRITE_ATTR
 
     ;If we get here we know we have successfully shot
     LDA #BULLET_FIRE_CD
@@ -145,7 +157,7 @@ TrySpawnBullet:
     LDA sprite_player + SPRITE_ATTR
     AND #BULLET_LEFT
     ORA #BULLET_ACTIVE
-    STA bulletFlag
+    STA bullet_flag
     RTS
 GunCoolDown:
     DEC player_shot_CD
@@ -155,7 +167,7 @@ NoSpawnBullet:
 GameUpdate:
 
 UpdateBullet:
-    LDA bulletFlag
+    LDA bullet_flag
     AND #BULLET_ACTIVE
     BEQ UpdateEnemies
 
@@ -163,7 +175,7 @@ UpdateBullet:
     STA bullet_anim + anim_status
     AnimateSprite sprite_bullet, bulletSprites, bullet_anim
     ;Branch to move bullt in Direction
-    LDA bulletFlag
+    LDA bullet_flag
     AND #BULLET_LEFT
     BEQ BulletRight
 
@@ -183,7 +195,7 @@ BulletLeft:
 
     ;Kill bullet
     LDA #BULLET_INACTIVE
-    STA bulletFlag
+    STA bullet_flag
     LDA #248
     STA sprite_bullet + SPRITE_Y
 
@@ -210,7 +222,7 @@ NotDead:
 
     CheckSpriteCollisionWithXReg sprite_enemy, #E_WIDTH, #E_HEIGHT, sprite_barrier, #W_WIDTH , #W_HEIGHT -#1, #0,#0
 
-    LDA collisionFlag
+    LDA collision_flag
     BNE UpdateEnemiesNoReverse
 
     JSR DamageBarrier
@@ -235,7 +247,7 @@ UpdateEnemiesNoReverse:
 
     CheckSpriteCollisionWithXReg sprite_enemy, #E_WIDTH, #E_HEIGHT, sprite_bullet, #8,#8, #0,#0
 
-    LDA collisionFlag
+    LDA collision_flag
     BNE CheckPlayerCollision
 
     ; Decrement enemy health
@@ -247,7 +259,7 @@ UpdateEnemiesNoReverse:
 
     ;Kill bullet
     LDA #BULLET_INACTIVE
-    STA bulletFlag
+    STA bullet_flag
     LDA #248
     STA sprite_bullet + SPRITE_Y
 
@@ -266,7 +278,7 @@ UpdateEnemiesNoReverse:
 CheckPlayerCollision:
     CheckSpriteCollisionWithXReg sprite_enemy, #E_WIDTH, E_HEIGHT, sprite_player, #P_WIDTH,#P_HEIGHT, #0,#0
 
-    LDA collisionFlag
+    LDA collision_flag
     BNE UpdateEnemiesNoCollision
 
     JSR PlayerDamaged
@@ -367,21 +379,21 @@ InitStartScreen:
 
     ;Press A message Using sprite Enemy because we know they're
     ;going to be overridden when the game actually start
-    InitSpriteAtsub_pos sprite_enemy, #120, #136, press_sprites,#%000100001
-    InitSpriteAtsub_pos sprite_enemy+4, #128, #136, press_sprites+1, #%000100001
-    InitSpriteAtsub_pos sprite_enemy+8, #136, #136, press_sprites+2, #%000100001
-    InitSpriteAtsub_pos sprite_enemy+12, #144, #136, press_sprites+3, #%000100001
-    InitSpriteAtsub_pos sprite_enemy+16, #152, #136, press_sprites+4, #%000100001
-    InitSpriteAtsub_pos sprite_enemy+20, #176, #136, aSprite, #%000100001
+    InitSpriteAtPos sprite_enemy, #120, #136, press_sprites,#%000100001
+    InitSpriteAtPos sprite_enemy+4, #128, #136, press_sprites+1, #%000100001
+    InitSpriteAtPos sprite_enemy+8, #136, #136, press_sprites+2, #%000100001
+    InitSpriteAtPos sprite_enemy+12, #144, #136, press_sprites+3, #%000100001
+    InitSpriteAtPos sprite_enemy+16, #152, #136, press_sprites+4, #%000100001
+    InitSpriteAtPos sprite_enemy+20, #176, #136, aSprite, #%000100001
 
 
     RTS
 
 InitBarrier:
-    InitSpriteAtsub_pos sprite_barrier , #0, #245, barrier_sprites, #%00000000
-    InitSpriteAtsub_pos sprite_barrier +4, #0, #245, barrier_sprites+1, #%00000000
-    InitSpriteAtsub_pos sprite_barrier +8, #0, #245, barrier_sprites+2, #%00000000
-    InitSpriteAtsub_pos sprite_barrier +12, #0, #245, barrier_sprites+3, #%00000000
+    InitSpriteAtPos sprite_barrier , #0, #245, barrier_sprites, #%00000000
+    InitSpriteAtPos sprite_barrier +4, #0, #245, barrier_sprites+1, #%00000000
+    InitSpriteAtPos sprite_barrier +8, #0, #245, barrier_sprites+2, #%00000000
+    InitSpriteAtPos sprite_barrier +12, #0, #245, barrier_sprites+3, #%00000000
     LDA #2
     STA barrier_health
 
@@ -504,8 +516,8 @@ EndFlash:
 InitWaveSprites:
     ;Could initialise sprites in a loop, although this is code duplication, it is more efficient this way
     ; and there is less code total
-    InitSpriteAtsub_pos sprite_Wave, #200, #10,  WaveSprites, #%00000001
-    InitSpriteAtsub_pos sprite_Wave+4, #210, #10,  WaveSprites +1, #%00000001
+    InitSpriteAtPos sprite_Wave, #200, #10,  WaveSprites, #%00000001
+    InitSpriteAtPos sprite_Wave+4, #210, #10,  WaveSprites +1, #%00000001
     RTS
 
 
@@ -514,18 +526,18 @@ InitLoseSprites:
 
     ;Could initialise sprites in a loop, although this is code duplication, it is more efficient this way
     ; and there is less code total
-    InitSpriteAtsub_pos sprite_enemy, #120, #136, DeadSprites, #%00000001
-    InitSpriteAtsub_pos sprite_enemy+4, #128, #136, DeadSprites+1, #%00000001
-    InitSpriteAtsub_pos sprite_enemy+8, #136, #136, DeadSprites+2, #%00000001
-    InitSpriteAtsub_pos sprite_enemy+12, #144, #136, DeadSprites+3, #%00000001
+    InitSpriteAtPos sprite_enemy, #120, #136, DeadSprites, #%00000001
+    InitSpriteAtPos sprite_enemy+4, #128, #136, DeadSprites+1, #%00000001
+    InitSpriteAtPos sprite_enemy+8, #136, #136, DeadSprites+2, #%00000001
+    InitSpriteAtPos sprite_enemy+12, #144, #136, DeadSprites+3, #%00000001
     LDA #248
     STA sprite_enemy + SPRITE_Y + 16
     STA sprite_enemy + SPRITE_Y + 20
     RTS
 
 InitWinSprites:
-    InitSpriteAtsub_pos sprite_enemy, #120, #136, GGsprites, #%00000001
-    InitSpriteAtsub_pos sprite_enemy+4, #128, #136, GGsprites+1, #%00000001
+    InitSpriteAtPos sprite_enemy, #120, #136, GGsprites, #%00000001
+    InitSpriteAtPos sprite_enemy+4, #128, #136, GGsprites+1, #%00000001
     LDA #248
     STA sprite_enemy + SPRITE_Y + 8
     STA sprite_enemy + SPRITE_Y + 12
@@ -571,16 +583,16 @@ InitGame:
 InitPlayerSprites:
 
     ;legs
-    InitSpriteAtsub_pos sprite_player, #220, #220,  #$20, #%00000000
+    InitSpriteAtPos sprite_player, #220, #220,  #$20, #%00000000
 
     ;body
-    InitSpriteAtsub_pos sprite_player + 4, #0, #00,  #$10, #%00000000
+    InitSpriteAtPos sprite_player + 4, #0, #00,  #$10, #%00000000
 
     ;gun
-    InitSpriteAtsub_pos sprite_player + 8 ,#0, #0,  #$11, #%00000000
+    InitSpriteAtPos sprite_player + 8 ,#0, #0,  #$11, #%00000000
     
     ;head
-    InitSpriteAtsub_pos sprite_player + 12, #0, #0,  #$00, #%00000000
+    InitSpriteAtPos sprite_player + 12, #0, #0,  #$00, #%00000000
 
 
 ; Init anim data for player
@@ -593,13 +605,13 @@ InitPlayerSprites:
     LDA #0
     STA player_waves
 
-    InitSpriteAtsub_pos sprite_health, #10, #10,  HeartSprite, #%00000001
-    InitSpriteAtsub_pos sprite_health+4, #20, #10,  HeartSprite, #%00000001
-    InitSpriteAtsub_pos sprite_health+8, #30, #10,  HeartSprite, #%00000001
+    InitSpriteAtPos sprite_health, #10, #10,  HeartSprite, #%00000001
+    InitSpriteAtPos sprite_health+4, #20, #10,  HeartSprite, #%00000001
+    InitSpriteAtPos sprite_health+8, #30, #10,  HeartSprite, #%00000001
 
 ;--------------------- Poo sprite data --------------------;
 
-    InitSpriteAtsub_pos sprite_poo, #126,#126, #$40, #%00000000
+    InitSpriteAtPos sprite_poo, #126,#126, #$40, #%00000000
 
     LDA #3
     STA poo_anim + anim_max_index
