@@ -49,10 +49,17 @@ LookAtLeft:
 
     DEC sprite_player + SPRITE_X
 
+    ;Check for min X (stops wrapping)
+    LDA sprite_player + SPRITE_X
+    CMP #X_MIN
+    BCC NoLeftMove
+
     LDX #0
     CheckSpriteCollisionWithXReg sprite_player, #8, #24, sprite_barrier, #W_WIDTH, #W_HEIGHT -#1, #0,#0
     LDA collision_flag
     BNE LookAtRight
+
+NoLeftMove:
     INC sprite_player + SPRITE_X    
 ;----------- RIGHT BUTTON--------;
 LookAtRight:
@@ -65,10 +72,18 @@ LookAtRight:
     STA sprite_player+SPRITE_ATTR
 
     INC sprite_player + SPRITE_X
+
+    ;Check for min X (stops wrapping)
+    LDA sprite_player + SPRITE_X
+    CMP #X_MAX
+    BCS NoRightMove
+
     LDX #0
     CheckSpriteCollisionWithXReg sprite_player, #8, #24, sprite_barrier, #W_WIDTH, #W_HEIGHT -#1,#0, #0
     LDA collision_flag
     BNE LookAtStart
+
+NoRightMove:
     DEC sprite_player + SPRITE_X
 
 ;----------- START BUTTON--------;
@@ -212,9 +227,9 @@ NotDead:
     CLC
     ADC enemy_info + enemy_speed, x
     STA sprite_enemy+SPRITE_X,X
-    CMP  #256 - 8 
+    CMP  #X_MAX
     BCS EnemyReverse
-    CMP #2
+    CMP #X_MIN
     BCC EnemyReverse
 
     CheckSpriteCollisionWithXReg sprite_enemy, #E_WIDTH, #E_HEIGHT, sprite_barrier, #W_WIDTH , #W_HEIGHT -#1, #0,#0

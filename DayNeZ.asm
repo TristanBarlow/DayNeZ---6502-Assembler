@@ -65,8 +65,11 @@ W_NUM_SPRITES = 4
 P_WIDTH = 8
 P_HEIGHT = 24
 P_NUM_SPRITES = 4
+P_SPAWN_X    = 230
+P_SPAWN_Y    = 200
 
-
+X_MIN  = 16
+X_MAX  = 232
 
 ANIM_FRAME_SPEED = 4
 
@@ -164,6 +167,8 @@ anim_status     .rs 1
     .bank 0
     .org $C000 
 
+    ; Include macros here so we can use them during the init process
+    INCLUDE "macros.asm"
 ;----------------------------- RESET ---------------------;
 RESET:
     SEI          ; disable IRQs
@@ -214,14 +219,7 @@ vblankwait2:      ; Second wait for vblank, PPU is ready after this
     STA PPUADDR
 
 ;write background
-    LDA #$0F
-    STA PPUDATA
-    LDA #$00
-    STA PPUDATA
-    LDA #$1C
-    STA PPUDATA
-    LDA #$08
-    STA PPUDATA
+    LoadPalette backGroundPalettes
 
     ; Write Address $3F10 (sprite colour) to the ppu
     LDA #$3F
@@ -229,25 +227,9 @@ vblankwait2:      ; Second wait for vblank, PPU is ready after this
     LDA #$10
     STA PPUADDR
 
-; Write pallet 00
-    LDA #$0F
-    STA PPUDATA
-    LDA #$18
-    STA PPUDATA
-    LDA #$20
-    STA PPUDATA
-    LDA #$2A
-    STA PPUDATA
-
-    ; Write pallet 01
-    LDA #$0F
-    STA PPUDATA
-    LDA #$24
-    STA PPUDATA
-    LDA #$20
-    STA PPUDATA
-    LDA #$15
-    STA PPUDATA
+    ; load our pallets
+    LoadPalette palettes
+    LoadPalette palettes+4
 
     ;load nametable data
     LDA #$20            ; write adress 
@@ -355,7 +337,6 @@ EndNMI:
 
 SPRITE
 ;;;;;;;;;;;;;;   
-    INCLUDE "macros.asm"
     INCLUDE "subroutines.asm"
     INCLUDE "sprite_data.asm"
     .bank 1

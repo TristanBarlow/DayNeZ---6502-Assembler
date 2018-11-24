@@ -3,6 +3,17 @@ SignFlip .macro
     CLC 
     ADC #1
     .endm
+;|1:Pallette Array|
+LoadPalette .macro
+    LDA \1
+    STA PPUDATA
+    LDA \1+1
+    STA PPUDATA
+    LDA \1+2
+    STA PPUDATA
+    LDA \1+3
+    STA PPUDATA
+    .endm
 
 ; 1st param adress second param value to add
 AddValueInLoop .macro
