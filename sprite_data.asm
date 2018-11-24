@@ -54,10 +54,8 @@ NameTableLabel:
 
     
 ;--------------------- Data tabe-------------;
-table: 
-     .dw UpdateEnemiesNoCollision-1  
 playerSprites:
-    .db $00, $10, $20
+    .db $20, $10,$11,$00 
 playerGun:
     .db $11, $21, $01
 enemySprites:

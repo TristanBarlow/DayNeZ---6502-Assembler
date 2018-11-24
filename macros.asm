@@ -15,7 +15,7 @@ LoadPalette .macro
     STA PPUDATA
     .endm
 
-; 1st param adress second param value to add
+;| 1: variable | 2: value
 AddValueInLoop .macro
     LDA \1,x
     CLC
@@ -23,7 +23,7 @@ AddValueInLoop .macro
     STA \1,x
     .endm
 
-; 1st param adress second param value to add
+;|1: variable | 2: value
 AddValue .macro
     LDA \1
     CLC
@@ -31,12 +31,27 @@ AddValue .macro
     STA \1
     .endm
 
-; 1: variable to subtract |2: value to sub 
+; 1: variable |2: value 
 SubtractValue .macro
     LDA \1
     SEC
     SBC \2
     STA \1
+    .endm
+;1: Movement Var | 2: sprite |3: pixelOffset| 4: sub_Offset
+SubPixelAddX .macro
+    AddValue \1 + sub_pos_x, #\4
+    LDA \2 + SPRITE_X
+    ADC #\3
+    STA \2 + SPRITE_X
+    .endm
+
+;1: Movement Var | 2: sprite |3: pixelOffset| 4: sub_Offset
+SubPixelMinusX .macro
+    SubtractValue \1 + sub_pos_x, #\4
+    LDA \2 + SPRITE_X
+    SBC #\3
+    STA \2 + SPRITE_X
     .endm
 
 ;| 1: 16 variable | 2: 16bit Value to add| 
@@ -64,26 +79,39 @@ MultiplyLoop\@:
     .endm
 
 ;| 1: movement| 2: sprite | 3: body |4 anim | 5: enemy info | 6: Enemy Head
+;This macros is basically the states for the enemies behaviour
 OutOfLoopEnemyUpdate .macro
+    ;Get the health of the enemy coming in, check to see if its positive
     LDA \5 + enemy_health
-    BMI Dead\@
+    BEQ Dead\@
+
+    ;If its here we know its alive, so check how alive it is
     JMP CheckForHead\@
 
 Dead\@:
+    ;Apply physics to the body of the zombie, using the original enemies legs
     ApplyPhysics \1, \3 
+    
+    ;Hide the rest of th enemy
     LDA #248
     STA \2 + SPRITE_Y
     STA \3+4 + SPRITE_Y
-    JMP DoHeadPhyscis\@
+
+    ;If its dead we also know the head will be off so do some physics on it
+    JMP TryDoHeadPhyscis\@
 
 CheckForHead\@:
+    ;DO jump and Phyiscs and animate enemy
     Jump \1, \2
     ApplyPhysics \1,\2
     AnimateSprite \3 + 4, enemyArm, \4
 
+    ;Check to see if the enemy has max health if not then off with its head
     LDA \5 + enemy_health
-    CMP #1
+    CMP #2
     BCC NoHead\@
+
+    ;If we are here then the zombie has a head :(
     UpdateSpritesToRoot \2,#3, \3,  humanSpriteXOffsets, humanSpriteYOffsets
     JMP EndUpdate\@
 NoHead\@:
@@ -91,7 +119,16 @@ NoHead\@:
     UpdateSpritesToRoot \2,#2, \3,  humanSpriteXOffsets, humanSpriteYOffsets
     LDA #1
     STA \4 +anim_status
-DoHeadPhyscis\@:
+TryDoHeadPhyscis\@:
+
+    ;compare the head height to the floor, if its less than the floor height dont do physics
+    ;as we know the heads wont do anything after they drop to floor and will spend more time on the
+    ;floor than in the air so this should save some CPU cycles
+    LDA \3 + 8 +SPRITE_Y
+    CMP #FLOORHEIGHT+1
+    BCC DoHeadPhysics\@
+    JMP EndUpdate\@
+DoHeadPhysics\@:
     ApplyPhysics \6, \3 + 8
 EndUpdate\@:
     .endm
@@ -140,6 +177,7 @@ FinishedAnim\@:
     STA \3 + anim_status
     STA \3 + anim_index
 
+    ;reset to default animation tile
     LDY \3 + anim_index
     LDA \2, y
     STA \1 + SPRITE_TILE
@@ -154,17 +192,22 @@ UpdateSpritesToRoot .macro
     LDX #((\2-1) * 4)
     LDY #(\2-1)
 ApplyToSprites\@:
+
+    ;Load in the root sprites Y and apply the offset to the current offset sprite
     LDA \1 + SPRITE_Y
     CLC
     ADC \5, y
     STA \3 + SPRITE_Y,x
 
+    ;Make sure their attr are the same, for both flip and for palette 
     LDA \1 + SPRITE_ATTR
     STA \3 + SPRITE_ATTR, x
 
+    ;Check to see which direction the sprite is facing
     AND #%01000000
     BNE LeftFacing\@
 
+    ;Apply the X offsets for a right facing root sprite
     LDA \1+SPRITE_X
     CLC
     ADC \4, y
@@ -172,12 +215,14 @@ ApplyToSprites\@:
     JMP FinishedXMove\@
 
 LeftFacing\@:
+    ;Apply the X offsets for a left facing root sprite
     LDA \1+SPRITE_X
     SEC
     SBC \4, y
     STA \3 + SPRITE_X,x
 
 FinishedXMove\@:
+    ;Decrement to get the next offset
     DEX
     DEX
     DEX
@@ -219,9 +264,9 @@ ApplyPhysics .macro
     CMP #FLOORHEIGHT
     BCS OnGround\@
 
+    ;Check physics object against barrier to see if we're colliding
     LDX #0
-    
-    CheckSpriteCollisionWithXReg \2, #8,#0, sprite_barrier, #W_WIDTH,#W_HEIGHT-#1, #0,#0
+    CheckSpriteCollisionWithXReg \2, #8,#0, sprite_barrier, #B_WIDTH,#B_HEIGHT, #0,#0
     LDA collision_flag
     BEQ Onbarrier\@
 
@@ -229,16 +274,16 @@ ApplyPhysics .macro
     JMP ReturnFromApplyPhysics\@
 
 Onbarrier\@:
+    ;Reset speeds to 0
     LDA #0
     STA \1 +speed_y
     STA \1 +speed_y+1
     STA \1 + sub_pos
 
-
+    ;Get the Top of the sprite barrier and set \2 sprite Y to it
     LDA sprite_barrier + SPRITE_Y
     SEC
-
-    SBC #W_HEIGHT
+    SBC #B_HEIGHT
     STA \2 + SPRITE_Y
     JMP ReturnFromApplyPhysics\@
 
@@ -326,29 +371,33 @@ Fin\@:
 ; SET X REG TO 0 IF NOT IN LOOP WITH CONSTANT COLLISION SIZES
 ;| 1: sprite1| 2 : w1 | 3 : h1 | 4 : sprite2 | 5 : w2 | 6 :  h2| 7: xMove | 8:yMove
 CheckSpriteCollisionWithXReg .macro 
+    ;Initialise collision as if We have collided 
     LDA #%00000000
     STA collision_flag
 
-    LDA \1 + SPRITE_X, x      ; load x1
+    ; branch if x1 - (w2 + dx)  >= x2 
+    LDA \1 + SPRITE_X, x      
     SEC
-    SBC #\5 + #\7   ; subtract w2
-    CMP \4 + SPRITE_X          ;compare with x2  
-    BCS NoCollision\@ ; branch if x1-w2 >=
+    SBC #\5 + #\7   
+    CMP \4 + SPRITE_X   
+    BCS NoCollision\@ 
 
-
+    ;Branch if (x1 - (w2 + dx)) + w1 + w2 + dx < x2
     CLC 
-    ADC #\2 + #\5  + #\7    ; Add width 1 and width 2 AND the x movement
-    CMP \4 + SPRITE_X          ; compare to x2
-    BCC NoCollision\@ ; branch if no collision
+    ADC #\2 + #\5  + #\7    
+    CMP \4 + SPRITE_X       
+    BCC NoCollision\@ 
     
-    LDA \1 + SPRITE_Y, x ; caluclate y_enemy - bullet width(y1 - h2)
+    ;Branch if y1 + h2 + dy < y2
+    LDA \1 + SPRITE_Y, x 
     CLC
-    ADC #\6 +#\8                    ; assume w2 = 8
-    CMP \4+SPRITE_Y         ;compare with x  bullet   
-    BCC NoCollision\@ ; branch if x1-w2 >=
+    ADC #\6 +#\8                    
+    CMP \4+SPRITE_Y        
+    BCC NoCollision\@ 
 
+    ;Branch if (y1 + h2+ dy) - (h1 + h2 + dy) < y2 (if branch here it means there is a hit)
     SEC 
-    SBC #\3+#\6  + #\8            ; Calculat x_enemy + w_eneym (x1 + w1) assuming w1 = 8
+    SBC #\3+#\6  + #\8           
     CMP \4+SPRITE_Y 
     BCC EndCollision\@ ; 
 
