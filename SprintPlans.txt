@@ -1,0 +1,31 @@
+Sprint 1:
+In this sprint, I will set up the basic controls that will be used to play the game.
+I will also have an enemy sprite that will appear at the top of the screen, this sprite will just be going back and forth. 
+By the end of this sprint, I will also give the player the ability to shoot directly up, this bullet will be destroyed upon leaving the screen. 
+Each different game object will have a different sprite so you can distinguish what is what. 
+
+
+Sprint 2:
+In this sprint, there will be a focus on getting multiple enemies to spawn on the screen at one time.
+ The large focus on this sprint will be getting a smooth gravity system to work.
+ This includes all of the enemies and sprites.
+ Everything that is under the influence of gravity must stop at the same Y height to simulate a floor.
+ There will also be a wall that will collide stopping the enemies and players. 
+To overcome this both the enemies and the players will be given the ability to jump smoothly.
+ 
+
+Sprint 3:
+This sprint will mainly be focused on making the game look better.
+ This will involve making the players and the enemies consist of multiple sprites and moving them all together. 
+Also setting up a basic background will make the world come to life. 
+Applying gravity will make all the enemies and the players on the same fighting level as well as increase immersion.
+ Making the characters sprites flip with the direction they are facing (with extremities) will increase the polish of the game and make it feel much better.
+
+Sprint 4:
+This sprint will focus on gameplay elements.
+ We focus on making the game more balanced such as not allowing the player to rapid fire shoot.
+ Also giving the player some time to prepare before all the enemies come after them.
+ In addition, we will make the game a full loop, with win/lose/title/in-game states. 
+The player will also be given the ability to do non-killing related abilities which will be animated.
+ It will become more of a game and less of a tech demo this sprint. Also the barrier will get some tweaks and changes to make it more viable and less buggy.
+
