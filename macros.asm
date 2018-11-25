@@ -108,7 +108,7 @@ CheckForHead\@:
 
     ;Check to see if the enemy has max health if not then off with its head
     LDA \5 + enemy_health
-    CMP #2
+    CMP #E_DECAP_HP
     BCC NoHead\@
 
     ;If we are here then the zombie has a head :(

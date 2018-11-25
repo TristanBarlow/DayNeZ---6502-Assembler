@@ -50,6 +50,7 @@ E_Y_SPAWN          = 220
 E_BASE_SPRITE      = $22           
 E_BODY_PARTS       = 3
 E_ANIM_SPRITES     = 4
+E_DECAP_HP         = 2
 
 ;offset into sprite that is the player gun sub_positions
 WEAPON_OFFSET      = 8
