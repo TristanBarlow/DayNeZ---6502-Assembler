@@ -80,7 +80,7 @@ X_MAX            = 232
 JUMP_FORCE       = -(256)
 NUMBER_OF_WAVES  = 3
 ANIM_FRAME_SPEED = 4
-GRAVITY          = 8     ; Sub pixel per frame 
+GRAVITY          =   8     ; Sub pixel per frame 
 MAX_Y_SPEED      = 20  
 FLOORHEIGHT      = 210
 WAVE_COOL_DOWN   = 120
@@ -400,4 +400,4 @@ SPRITE
   
     .bank 2
     .org $0000
-    .incbin "../Sprites/Face.chr"   ;includes 8KB graphics file from SMB1
+    .incbin "Sprites/Face.chr"   ;includes 8KB graphics file from SMB1
